@@ -1,0 +1,7 @@
+[project]
+name = "project"
+version = "1.0.0"
+description = "My thesis project"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
