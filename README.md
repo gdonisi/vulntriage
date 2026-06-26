@@ -13,12 +13,12 @@ uv sync
 
 # Using synthetic test data with a local LM Studio model
 uv run python main.py --input data/synthetic_findings.json \
-    --provider lmstudio --model llama-3.2-3b \
+    --provider lmstudio --model qwen3.5-4b \
     --asset-registry data/assets.yaml
 
 # Using Nuclei JSONL output
 uv run python main.py --input data/sample_nuclei.jsonl \
-    --provider lmstudio --model llama-3.2-3b
+    --provider lmstudio --model qwen3.5-4b
 
 # Using OpenRouter
 OPENROUTER_API_KEY=sk-... uv run python main.py --input data/synthetic_findings.json \
@@ -27,7 +27,7 @@ OPENROUTER_API_KEY=sk-... uv run python main.py --input data/synthetic_findings.
 # Run the dockerized Nuclei scanner first, then triage
 docker build -t my-nuclei:latest docker/nuclei
 uv run python main.py --scan nuclei --target 192.168.1.5 \
-    --provider lmstudio --model llama-3.2-3b
+    --provider lmstudio --model qwen3.5-4b
 ```
 
 ## Pipeline
@@ -61,4 +61,4 @@ Risk = (CVSS/10 × 0.5) + (Exploitability × 0.3) + (Asset × 0.2)
 
 Where exploitability is High=1.0, Medium=0.5, Low=0.1.
 
-See `docs/superpowers/specs/2026-06-26-triage-pipeline-design.md` for the full design.
+See `docs/specs/2026-06-26-triage-pipeline-design.md` for the full design.

@@ -59,19 +59,62 @@ class OpenAICompatibleClient:
         return content
 
 
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise ValueError(f"Missing required environment variable: {name}")
+    return value
+
+
 def make_client(provider: str, model: str) -> LLMClient:
     """Factory that hides provider-specific connection details."""
+    provider = provider.strip().lower()
+
     if provider == "lmstudio":
         return OpenAICompatibleClient(
             base_url=os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
-            api_key="lm-studio",
+            api_key=os.environ.get("LMSTUDIO_API_KEY", "lm-studio"),
             model=model,
         )
+
+    if provider == "ollama":
+        return OpenAICompatibleClient(
+            base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            api_key=os.environ.get("OLLAMA_API_KEY", "ollama"),
+            model=model,
+        )
+
+    if provider in {"llamacpp", "llama.cpp"}:
+        return OpenAICompatibleClient(
+            base_url=os.environ.get("LLAMACPP_BASE_URL", "http://localhost:8080/v1"),
+            api_key=os.environ.get("LLAMACPP_API_KEY", "llama.cpp"),
+            model=model,
+        )
+
+    if provider == "vllm":
+        return OpenAICompatibleClient(
+            base_url=os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1"),
+            api_key=os.environ.get("VLLM_API_KEY", "vllm"),
+            model=model,
+        )
+
+    if provider == "openai":
+        return OpenAICompatibleClient(
+            base_url="https://api.openai.com/v1",
+            api_key=_require_env("OPENAI_API_KEY"),
+            model=model,
+        )
+
     if provider == "openrouter":
         return OpenAICompatibleClient(
             base_url="https://openrouter.ai/api/v1",
-            api_key=os.environ.get("OPENROUTER_API_KEY"),
+            api_key=_require_env("OPENROUTER_API_KEY"),
             model=model,
         )
-    msg = f"Unknown provider: {provider!r} (expected 'lmstudio' or 'openrouter')"
+
+    msg = (
+        f"Unknown provider: {provider!r} "
+        "(expected one of: 'lmstudio', 'ollama', 'llamacpp', "
+        "'vllm', 'openai', 'openrouter')"
+    )
     raise ValueError(msg)

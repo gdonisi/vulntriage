@@ -5,8 +5,8 @@ description = "LLM-enabled vulnerability investigation and triaging system"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "pydantic>=2.9",
-    "openai>=1.50",
+    "pydantic>=2.13",
+    "openai>=2.44",
     "pyyaml>=6.0",
 ]
 
