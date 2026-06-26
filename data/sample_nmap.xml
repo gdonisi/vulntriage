@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nmaprun scanner="nmap" args="nmap -sV 192.168.1.0/24" start="1700000000">
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.10" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="6379">
+        <state state="open"/>
+        <service name="redis" product="Redis" version="3.2.0"/>
+      </port>
+      <port protocol="tcp" portid="22">
+        <state state="closed"/>
+        <service name="ssh"/>
+      </port>
+    </ports>
+  </host>
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.20" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="22">
+        <state state="open"/>
+        <service name="ssh" product="OpenSSH" version="8.2p1"/>
+      </port>
+    </ports>
+  </host>
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.30" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="8080">
+        <state state="open"/>
+        <service name="http" product="Apache Tomcat" version="9.0.30"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>

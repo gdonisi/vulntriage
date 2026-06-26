@@ -1,0 +1,47 @@
+[
+  {
+    "id": "synthetic-0",
+    "host": "192.168.1.10",
+    "port": 6379,
+    "service": "redis",
+    "description": "Open Redis 3.2.0 without authentication",
+    "cvss": 9.8,
+    "cve": "CVE-2022-0543"
+  },
+  {
+    "id": "synthetic-1",
+    "host": "192.168.1.20",
+    "port": 22,
+    "service": "ssh",
+    "description": "OpenSSH 8.2p1, patched version on internal host",
+    "cvss": 3.1,
+    "cve": null
+  },
+  {
+    "id": "synthetic-2",
+    "host": "192.168.1.30",
+    "port": 8080,
+    "service": "http",
+    "description": "Apache Tomcat 9.0.30 with manager app exposed and default credentials",
+    "cvss": 8.1,
+    "cve": null
+  },
+  {
+    "id": "synthetic-3",
+    "host": "192.168.1.40",
+    "port": 80,
+    "service": "http",
+    "description": "nginx 1.25.3, no known vulnerabilities, internet-facing",
+    "cvss": null,
+    "cve": null
+  },
+  {
+    "id": "synthetic-4",
+    "host": "192.168.1.50",
+    "port": 3306,
+    "service": "mysql",
+    "description": "MySQL 5.7.27 with anonymous account and weak root password, internal-only",
+    "cvss": 7.5,
+    "cve": null
+  }
+]

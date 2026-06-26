@@ -1,0 +1,5 @@
+192.168.1.10: 1.0   # redis database
+192.168.1.20: 0.5   # dev workstation
+192.168.1.30: 0.8   # app server
+192.168.1.40: 0.3   # static web host
+192.168.1.50: 1.0   # database
