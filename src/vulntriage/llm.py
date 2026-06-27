@@ -23,10 +23,21 @@ class LLMClient(Protocol):
 
 
 class OpenAICompatibleClient:
-    """One client for both LM Studio and OpenRouter.
+    """Client for every LLM provider.
 
-    LM Studio:  base_url=http://localhost:1234/v1, api_key="lm-studio"
-    OpenRouter: base_url=https://openrouter.ai/api/v1, api_key from env
+    Parameters
+    ----------
+    base_url:
+        Endpoint URL for the provider.
+    api_key:
+        API key (``None`` / ``"none"`` for local providers).
+    model:
+        Model name forwarded in every request.
+    reasoning_effort:
+        Controls how much thinking / reasoning the model performs.
+        Pass ``None`` (default) to disable reasoning entirely (the
+        standard behaviour of non-reasoning models). Set to
+        ``"low"``, ``"medium"``, or ``"high"``.  Provider support varies.
     """
 
     def __init__(
@@ -35,12 +46,17 @@ class OpenAICompatibleClient:
         base_url: str,
         api_key: str | None,
         model: str,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.model = model
+        self._reasoning_effort = reasoning_effort
         self._client = OpenAI(base_url=base_url, api_key=api_key or "none")
 
     def complete(self, system: str, user: str) -> str:
         start = time.perf_counter()
+        kwargs: dict = {}
+        if self._reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self._reasoning_effort
         resp = self._client.chat.completions.create(
             model=self.model,
             messages=[
@@ -48,6 +64,7 @@ class OpenAICompatibleClient:
                 {"role": "user", "content": user},
             ],
             temperature=0.2,
+            **kwargs,
         )
         elapsed = time.perf_counter() - start
         content = resp.choices[0].message.content or ""
@@ -66,8 +83,25 @@ def _require_env(name: str) -> str:
     return value
 
 
-def make_client(provider: str, model: str) -> LLMClient:
-    """Factory that hides provider-specific connection details."""
+def make_client(
+    provider: str,
+    model: str,
+    reasoning_effort: str | None = None,
+) -> LLMClient:
+    """Factory that hides provider-specific connection details.
+
+    Parameters
+    ----------
+    provider:
+        One of ``"lmstudio"``, ``"ollama"``, ``"llamacpp"``,
+        ``"vllm"``, ``"openai"``, ``"openrouter"``.
+    model:
+        Model name to use.
+    reasoning_effort:
+        Reasoning/thinking level for supported models.
+        ``None`` (default) = no reasoning (standard behaviour).
+        Pass ``"low"``, ``"medium"``, or ``"high"`` to enable.
+    """
     provider = provider.strip().lower()
 
     if provider == "lmstudio":
@@ -75,6 +109,7 @@ def make_client(provider: str, model: str) -> LLMClient:
             base_url=os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
             api_key=os.environ.get("LMSTUDIO_API_KEY", "lm-studio"),
             model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     if provider == "ollama":
@@ -82,6 +117,7 @@ def make_client(provider: str, model: str) -> LLMClient:
             base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
             api_key=os.environ.get("OLLAMA_API_KEY", "ollama"),
             model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     if provider in {"llamacpp", "llama.cpp"}:
@@ -89,6 +125,7 @@ def make_client(provider: str, model: str) -> LLMClient:
             base_url=os.environ.get("LLAMACPP_BASE_URL", "http://localhost:8080/v1"),
             api_key=os.environ.get("LLAMACPP_API_KEY", "llama.cpp"),
             model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     if provider == "vllm":
@@ -96,6 +133,7 @@ def make_client(provider: str, model: str) -> LLMClient:
             base_url=os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1"),
             api_key=os.environ.get("VLLM_API_KEY", "vllm"),
             model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     if provider == "openai":
@@ -103,6 +141,7 @@ def make_client(provider: str, model: str) -> LLMClient:
             base_url="https://api.openai.com/v1",
             api_key=_require_env("OPENAI_API_KEY"),
             model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     if provider == "openrouter":
@@ -110,6 +149,7 @@ def make_client(provider: str, model: str) -> LLMClient:
             base_url="https://openrouter.ai/api/v1",
             api_key=_require_env("OPENROUTER_API_KEY"),
             model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     msg = (

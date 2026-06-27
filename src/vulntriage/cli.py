@@ -38,8 +38,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a dockerized scanner against --target",
     )
     p.add_argument("--target", help="Target for --scan")
-    p.add_argument("--provider", required=True, choices=["lmstudio", "openrouter"])
+    p.add_argument(
+        "--provider",
+        required=True,
+        choices=[
+            "lmstudio",
+            "ollama",
+            "llamacpp",
+            "vllm",
+            "openai",
+            "openrouter",
+        ],
+    )
     p.add_argument("--model", required=True, help="Model name for the chosen provider")
+    p.add_argument(
+        "--reasoning-effort",
+        choices=["low", "medium", "high"],
+        default=None,
+        help=(
+            "Thinking effort for OpenAI reasoning models. "
+            "Omit for standard (non-reasoning) behaviour."
+        ),
+    )
     p.add_argument("--asset-registry", default=None, help="YAML mapping host->criticality")
     p.add_argument("--output", default=None, help="Write report to this path (default: stdout)")
     p.add_argument(
@@ -71,7 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # 2. Build LLM client.
-    client = make_client(args.provider, args.model)
+    client = make_client(
+        args.provider,
+        args.model,
+        reasoning_effort=args.reasoning_effort,
+    )
 
     # 3. Enrich.
     print("[pipeline] enriching findings...")

@@ -8,13 +8,15 @@ from __future__ import annotations
 
 from .models import PrioritizedFinding
 
+BAR_LENGTH = 80
+
 
 def render(findings: list[PrioritizedFinding]) -> str:
     """Render findings as a plain-text prioritized report."""
     lines: list[str] = []
-    lines.append("=" * 72)
+    lines.append("=" * BAR_LENGTH)
     lines.append("VULNERABILITY TRIAGE REPORT")
-    lines.append("=" * 72)
+    lines.append("=" * BAR_LENGTH)
     lines.append(f"Total findings: {len(findings)}")
     if findings:
         high = sum(1 for f in findings if f.exploitability.value == "High")
@@ -24,7 +26,7 @@ def render(findings: list[PrioritizedFinding]) -> str:
     lines.append("")
 
     for f in findings:
-        lines.append("-" * 72)
+        lines.append("-" * BAR_LENGTH)
         lines.append(f"#{f.rank} [{f.exploitability.value}] {f.description}")
         lines.append(f"  Host: {f.host}" + (f"  Port: {f.port}" if f.port else ""))
         if f.cve:
@@ -36,11 +38,12 @@ def render(findings: list[PrioritizedFinding]) -> str:
         lines.append(f"  Exploitability rationale: {f.exploitability_rationale}")
         lines.append("")
 
-    lines.append("-" * 72)
+    lines.append("-" * BAR_LENGTH)
     lines.append("RANKED SUMMARY")
-    lines.append("-" * 72)
+    lines.append("-" * BAR_LENGTH)
     lines.append(f"{'Rank':<5} {'Score':<7} {'Exploit':<8} {'Finding'}")
     for f in findings:
         lines.append(f"{f.rank:<5} {f.risk_score:<7} {f.exploitability.value:<8} {f.description}")
-    lines.append("=" * 72)
+    lines.append("=" * BAR_LENGTH)
+    lines.append("\n")
     return "\n".join(lines)

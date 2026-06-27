@@ -22,7 +22,11 @@ uv run python main.py --input data/sample_nuclei.jsonl \
 
 # Using OpenRouter
 OPENROUTER_API_KEY=sk-... uv run python main.py --input data/synthetic_findings.json \
-    --provider openrouter --model openai/gpt-4o
+    --provider openrouter --model deepseek/deepseek-v4-flash
+
+# Using OpenAI API Platform with thinking on
+OPENAI_API_KEY=sk-... uv run python main.py --input data/synthetic_findings.json \
+    --provider openai --model gpt-5.4-nano --reasoning-effort high
 
 # Run the dockerized Nuclei scanner first, then triage
 docker build -t my-nuclei:latest docker/nuclei
