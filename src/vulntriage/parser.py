@@ -36,7 +36,7 @@ def _parse_nmap(path: Path) -> list[RawFinding]:
     findings: list[RawFinding] = []
     for host in root.findall("host"):
         addr = host.find("address")
-        ip = addr.get("addr") if addr is not None else "unknown"
+        ip = addr.get("addr", "unknown") if addr is not None else "unknown"
         for port_el in host.iter("port"):
             port_id = int(port_el.get("portid", "0"))
             state_el = port_el.find("state")

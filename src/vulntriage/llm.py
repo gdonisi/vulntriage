@@ -18,6 +18,9 @@ class LLMClient(Protocol):
     """Minimal interface every pipeline module relies on."""
 
     model: str
+    # Accumulated prompt+completion tokens across all calls (best-effort;
+    # mock/local clients without usage data may not expose this attribute).
+    total_tokens: int
 
     def complete(self, system: str, user: str) -> str: ...
 
@@ -51,6 +54,8 @@ class OpenAICompatibleClient:
         self.model = model
         self._reasoning_effort = reasoning_effort
         self._client = OpenAI(base_url=base_url, api_key=api_key or "none")
+        # Best-effort running total of tokens consumed across all calls.
+        self.total_tokens: int = 0
 
     def complete(self, system: str, user: str) -> str:
         start = time.perf_counter()
@@ -69,6 +74,8 @@ class OpenAICompatibleClient:
         elapsed = time.perf_counter() - start
         content = resp.choices[0].message.content or ""
         usage = getattr(resp, "usage", None)
+        if usage and getattr(usage, "total_tokens", None):
+            self.total_tokens += usage.total_tokens
         print(
             f"  [llm] model={self.model} {elapsed:.2f}s "
             f"tokens={usage.total_tokens if usage else '?'}"

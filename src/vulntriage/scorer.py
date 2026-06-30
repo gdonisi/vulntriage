@@ -20,7 +20,7 @@ SYSTEM_PROMPT = (
 )
 
 # Few-shot examples anchor the label semantics.
-USER_TEMPLATE = """Here are examples of exploitability ratings:
+FEW_SHOT_BLOCK = """Here are examples of exploitability ratings:
 
 Example 1:
 Finding: Open Redis 3.2 without authentication, internet-facing.
@@ -34,7 +34,9 @@ Context: No known exploits for the version; requires network access to the
 internal segment.
 Rating: Low
 
-Now rate this finding:
+"""
+
+USER_TEMPLATE = """{few_shot}Now rate this finding:
 
 Host: {host}
 Service: {service}
@@ -52,9 +54,14 @@ Provide a JSON object with this exact schema:
 Respond with the JSON object only."""
 
 
-def score(finding: EnrichedFinding, client: LLMClient) -> ScoredFinding:
-    """Score a single finding's exploitability via the LLM."""
+def score(finding: EnrichedFinding, client: LLMClient, *, few_shot: bool = True) -> ScoredFinding:
+    """Score a single finding's exploitability via the LLM.
+
+    Set ``few_shot=False`` to omit the worked examples (zero-shot prompting);
+    the default ``True`` preserves the v1 behaviour.
+    """
     user = USER_TEMPLATE.format(
+        few_shot=FEW_SHOT_BLOCK if few_shot else "",
         host=finding.host,
         service=finding.service or "unknown",
         description=finding.description,
@@ -74,12 +81,17 @@ def score(finding: EnrichedFinding, client: LLMClient) -> ScoredFinding:
     )
 
 
-def score_all(findings: list[EnrichedFinding], client: LLMClient) -> list[ScoredFinding]:
+def score_all(
+    findings: list[EnrichedFinding],
+    client: LLMClient,
+    *,
+    few_shot: bool = True,
+) -> list[ScoredFinding]:
     """Score a list of findings, logging progress."""
     scored: list[ScoredFinding] = []
     for i, f in enumerate(findings, 1):
         print(f"[scorer] ({i}/{len(findings)}) {f.id}")
-        scored.append(score(f, client))
+        scored.append(score(f, client, few_shot=few_shot))
     return scored
 
 

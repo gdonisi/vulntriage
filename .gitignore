@@ -11,3 +11,13 @@ wheels/
 
 .DS_Store
 .vscode/
+.ruff_cache/
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Generated outputs (keep dirs, ignore contents)
+output/eval/*
+output/reports/*
+!output/eval/.gitkeep
+!output/reports/.gitkeep

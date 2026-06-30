@@ -4,27 +4,30 @@
     "host": "192.168.1.10",
     "port": 6379,
     "service": "redis",
-    "description": "Open Redis 3.2.0 without authentication",
+    "description": "Open Redis 3.2.0 without authentication, internet-facing",
     "cvss": 9.8,
-    "cve": "CVE-2022-0543"
+    "cve": "CVE-2022-0543",
+    "ground_truth": { "exploit_maturity": "H", "label": "High" }
   },
   {
     "id": "synthetic-1",
     "host": "192.168.1.20",
     "port": 22,
     "service": "ssh",
-    "description": "OpenSSH 8.2p1, patched version on internal host",
+    "description": "OpenSSH 8.2p1 on internal host, patched against known CVEs",
     "cvss": 3.1,
-    "cve": null
+    "cve": "CVE-2024-6387",
+    "ground_truth": { "exploit_maturity": "U", "label": "Low" }
   },
   {
     "id": "synthetic-2",
     "host": "192.168.1.30",
     "port": 8080,
     "service": "http",
-    "description": "Apache Tomcat 9.0.30 with manager app exposed and default credentials",
+    "description": "Apache Tomcat 9.0.30 with manager app exposed and default credentials, internet-facing",
     "cvss": 8.1,
-    "cve": null
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "High" }
   },
   {
     "id": "synthetic-3",
@@ -33,7 +36,8 @@
     "service": "http",
     "description": "nginx 1.25.3, no known vulnerabilities, internet-facing",
     "cvss": null,
-    "cve": null
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "Low" }
   },
   {
     "id": "synthetic-4",
@@ -42,6 +46,157 @@
     "service": "mysql",
     "description": "MySQL 5.7.27 with anonymous account and weak root password, internal-only",
     "cvss": 7.5,
-    "cve": null
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "Medium" }
+  },
+  {
+    "id": "synthetic-5",
+    "host": "192.168.1.60",
+    "port": 8080,
+    "service": "http",
+    "description": "Apache Log4j 2.14.1 detected in a Java web app, internet-facing (CVE-2021-44228)",
+    "cvss": 10.0,
+    "cve": "CVE-2021-44228",
+    "ground_truth": { "exploit_maturity": "H", "label": "High" }
+  },
+  {
+    "id": "synthetic-6",
+    "host": "192.168.1.70",
+    "port": 8080,
+    "service": "http",
+    "description": "Jenkins 2.426 running with CLI exposed, internet-facing (CVE-2024-23897)",
+    "cvss": 9.8,
+    "cve": "CVE-2024-23897",
+    "ground_truth": { "exploit_maturity": "H", "label": "High" }
+  },
+  {
+    "id": "synthetic-7",
+    "host": "192.168.1.80",
+    "port": 8090,
+    "service": "http",
+    "description": "Atlassian Confluence 7.4.0 server exposed to the internet (CVE-2022-26134)",
+    "cvss": 9.8,
+    "cve": "CVE-2022-26134",
+    "ground_truth": { "exploit_maturity": "H", "label": "High" }
+  },
+  {
+    "id": "synthetic-8",
+    "host": "192.168.1.90",
+    "port": 9200,
+    "service": "elasticsearch",
+    "description": "Elasticsearch 1.4.2 without authentication and scripting enabled, internal (CVE-2015-1427)",
+    "cvss": 9.8,
+    "cve": "CVE-2015-1427",
+    "ground_truth": { "exploit_maturity": "F", "label": "High" }
+  },
+  {
+    "id": "synthetic-9",
+    "host": "192.168.1.100",
+    "port": 8080,
+    "service": "http",
+    "description": "Apache Struts 2.5.16 running a legacy action, internet-facing (CVE-2017-5638)",
+    "cvss": 10.0,
+    "cve": "CVE-2017-5638",
+    "ground_truth": { "exploit_maturity": "H", "label": "High" }
+  },
+  {
+    "id": "synthetic-10",
+    "host": "192.168.1.110",
+    "port": 3000,
+    "service": "http",
+    "description": "Grafana 8.0.0 with arbitrary file read, internal-only (CVE-2021-43798)",
+    "cvss": 7.5,
+    "cve": "CVE-2021-43798",
+    "ground_truth": { "exploit_maturity": "P", "label": "Medium" }
+  },
+  {
+    "id": "synthetic-11",
+    "host": "192.168.1.120",
+    "port": 27017,
+    "service": "mongodb",
+    "description": "MongoDB 4.0 without authentication exposed on the internal network",
+    "cvss": 7.5,
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "Medium" }
+  },
+  {
+    "id": "synthetic-12",
+    "host": "192.168.1.130",
+    "port": 8080,
+    "service": "http",
+    "description": "GitLab CE 16.1.0 self-hosted, account takeover possible via CVE-2023-7028, internal",
+    "cvss": 9.6,
+    "cve": "CVE-2023-7028",
+    "ground_truth": { "exploit_maturity": "P", "label": "Medium" }
+  },
+  {
+    "id": "synthetic-13",
+    "host": "192.168.1.140",
+    "port": 80,
+    "service": "http",
+    "description": "Apache HTTP Server 2.4.49 with path traversal, internet-facing (CVE-2021-41773)",
+    "cvss": 9.8,
+    "cve": "CVE-2021-41773",
+    "ground_truth": { "exploit_maturity": "F", "label": "High" }
+  },
+  {
+    "id": "synthetic-14",
+    "host": "192.168.1.150",
+    "port": 2375,
+    "service": "docker",
+    "description": "Docker Engine API exposed without TLS on port 2375, internet-facing, allows container escape",
+    "cvss": 9.8,
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "High" }
+  },
+  {
+    "id": "synthetic-15",
+    "host": "192.168.1.160",
+    "port": 80,
+    "service": "http",
+    "description": "WordPress 5.4 with multiple outdated plugins, internal-only, no known RCE CVE",
+    "cvss": 6.5,
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "Medium" }
+  },
+  {
+    "id": "synthetic-16",
+    "host": "192.168.1.170",
+    "port": 5432,
+    "service": "postgresql",
+    "description": "PostgreSQL 15.3, patched, listening only on localhost",
+    "cvss": null,
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "Low" }
+  },
+  {
+    "id": "synthetic-17",
+    "host": "192.168.1.180",
+    "port": 6379,
+    "service": "redis",
+    "description": "Redis 7.2.3 with authentication enabled and ACL hardening, internal-only",
+    "cvss": null,
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "Low" }
+  },
+  {
+    "id": "synthetic-18",
+    "host": "192.168.1.190",
+    "port": 22,
+    "service": "ssh",
+    "description": "OpenSSH 9.6p1 fully patched on a bastion host, internet-facing",
+    "cvss": null,
+    "cve": null,
+    "ground_truth": { "exploit_maturity": "X", "label": "Low" }
+  },
+  {
+    "id": "synthetic-19",
+    "host": "192.168.1.200",
+    "port": 8080,
+    "service": "http",
+    "description": "PHP 8.0 running on Windows with CGI, internal-only (CVE-2024-4577)",
+    "cvss": 9.8,
+    "cve": "CVE-2024-4577",
+    "ground_truth": { "exploit_maturity": "P", "label": "Medium" }
   }
 ]

@@ -59,3 +59,16 @@ class PrioritizedFinding(ScoredFinding):
     asset_criticality: float = 0.5
     risk_score: float = 0.0
     rank: int = 0
+
+
+class RemediatedFinding(PrioritizedFinding):
+    """A prioritized finding with LLM-generated remediation steps.
+
+    When light RAG is enabled, ``rag_hits`` lists the CVEs / services whose
+    KB entries were injected into the remediation prompt as grounding context.
+    """
+
+    remediation_steps: list[str] = Field(default_factory=list)
+    remediation_rationale: str = ""
+    rag_hits: list[str] = Field(default_factory=list)
+    remediation_model: str | None = None

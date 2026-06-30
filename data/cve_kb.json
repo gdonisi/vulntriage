@@ -1,0 +1,200 @@
+[
+  {
+    "cve": "CVE-2022-0543",
+    "service": "redis",
+    "summary": "Debian-packaged Redis Lua sandbox escape allowing remote code execution when Redis is exposed without authentication.",
+    "remediation_steps": [
+      "Upgrade Redis to a version patched against CVE-2022-0543 (Debian redis 5:6.0.16-1+deb11u2 or later).",
+      "Require authentication by setting a strong 'requirepass' (or use ACL users) in redis.conf.",
+      "Bind Redis to localhost or an internal interface only; never expose port 6379 to the internet.",
+      "Disable or restrict the EVAL/EVALSHA commands via rename-command if scripting is not needed."
+    ]
+  },
+  {
+    "cve": "CVE-2024-6387",
+    "service": "ssh",
+    "summary": "regreSSHion: a signal-handler race condition in OpenSSH sshd (sshd >= 8.5p1, <= 9.7p1) that can allow unauthenticated remote code execution as root.",
+    "remediation_steps": [
+      "Upgrade OpenSSH to 9.8p1 or later where CVE-2024-6387 is fixed.",
+      "If an immediate upgrade is not possible, set 'LoginGraceTime 0' in sshd_config as a temporary mitigation (note: this disables the grace-period race at the cost of DoS exposure).",
+      "Restrict sshd access with firewall rules to only trusted management networks.",
+      "Disable root login ('PermitRootLogin no') and enforce key-based authentication."
+    ]
+  },
+  {
+    "cve": "CVE-2021-44228",
+    "service": "http",
+    "summary": "Log4Shell: Apache Log4j2 JNDI features used in configuration, log messages, and parameters do not protect against attacker-controlled LDAP and other JNDI endpoints, enabling remote code execution.",
+    "remediation_steps": [
+      "Upgrade Log4j to 2.17.1 or later (or 2.12.4 / 2.3.2 for the 2.12 / 2.3 branches).",
+      "As an interim mitigation set 'log4j2.formatMsgNoLookups=true' or remove the JndiLookup class from the classpath.",
+      "Identify and patch all instances of Log4j across the application stack, including transitive dependencies.",
+      "Monitor logs for JNDI lookup patterns and outbound LDAP/RMI connections indicating exploitation attempts."
+    ]
+  },
+  {
+    "cve": "CVE-2024-23897",
+    "service": "http",
+    "summary": "Jenkins CLI argument parsing vulnerability that allows attackers to read arbitrary files on the Jenkins controller filesystem, often leading to credential theft and RCE.",
+    "remediation_steps": [
+      "Upgrade Jenkins to LTS 2.426.3 or weekly 2.442+ where CVE-2024-23897 is fixed.",
+      "Disable the CLI over the HTTP endpoint or restrict access to authenticated administrators until upgraded.",
+      "Rotate credentials and secrets stored in Jenkins after confirming exposure.",
+      "Place Jenkins behind a reverse proxy enforcing authentication and network ACLs."
+    ]
+  },
+  {
+    "cve": "CVE-2022-26134",
+    "service": "http",
+    "summary": "Confluence Server and Data Center OGNL injection vulnerability allowing unauthenticated remote code execution via the URI path.",
+    "remediation_steps": [
+      "Upgrade Confluence Server/Data Center to a fixed version (7.4.17, 7.13.7, 7.14.3, 7.15.2, 7.16.4, 7.17.4, 7.18.1, 7.19.0 or later).",
+      "Apply the official out-of-band patch or workaround if an immediate upgrade is not possible.",
+      "Review access logs for suspicious URI patterns indicating exploitation.",
+      "Rotate credentials and investigate for persistence if exploitation is confirmed."
+    ]
+  },
+  {
+    "cve": "CVE-2015-1427",
+    "service": "elasticsearch",
+    "summary": "Elasticsearch Groovy scripting sandbox escape allowing remote code execution when dynamic scripting is enabled and the instance is reachable.",
+    "remediation_steps": [
+      "Upgrade Elasticsearch to 1.4.3 or later and disable dynamic scripting ('script.disable_dynamic: true' on 1.x).",
+      "Require authentication and TLS; do not expose port 9200 to untrusted networks.",
+      "Move to a supported Elasticsearch version (5.x+) where the scripting model is sandboxed differently.",
+      "Restrict access with a reverse proxy or firewall to known internal clients only."
+    ]
+  },
+  {
+    "cve": "CVE-2017-5638",
+    "service": "http",
+    "summary": "Apache Struts 2 OGNL injection in the Content-Type / Content-Disposition header handling, enabling remote code execution on any Struts 2.3.5-2.3.31 and 2.5-2.5.10.",
+    "remediation_steps": [
+      "Upgrade Apache Struts to 2.3.32 or 2.5.10.1, or preferably to a current 2.5.x / 6.x release.",
+      "If upgrade is delayed, apply vendor mitigations and remove unused Struts REST plugin features.",
+      "Inspect web server logs for malformed Content-Type headers indicating exploit attempts.",
+      "Audit for web shells and rotate credentials on any exposed server."
+    ]
+  },
+  {
+    "cve": "CVE-2021-43798",
+    "service": "http",
+    "summary": "Grafana arbitrary file read vulnerability (Grafana 8.0.0-beta1 through 8.3.0) allowing unauthenticated attackers to read files from the server via path traversal in plugin URLs.",
+    "remediation_steps": [
+      "Upgrade Grafana to 8.0.7, 8.1.8, 8.2.7, or 8.3.1 or later.",
+      "Restrict Grafana access to authenticated internal users via reverse proxy and firewall.",
+      "Review logs for path-traversal plugin URL patterns and check for data exfiltration.",
+      "Rotate secrets stored in files that may have been readable (e.g., /etc/grafana/grafana.ini keys)."
+    ]
+  },
+  {
+    "cve": "CVE-2023-7028",
+    "service": "http",
+    "summary": "GitLab CE/EE account takeover via password reset: an unauthenticated attacker can reset arbitrary account passwords using crafted reset requests (GitLab 16.1-16.7.2).",
+    "remediation_steps": [
+      "Upgrade GitLab to 16.1.6, 16.2.6, 16.3.4, 16.4.4, 16.5.6, 16.6.6, 16.7.2 or later.",
+      "Audit password reset logs and force password resets for accounts whose email was used in reset requests.",
+      "Enable and enforce two-factor authentication for all users, especially administrators.",
+      "Restrict the GitLab instance to authenticated internal networks where possible."
+    ]
+  },
+  {
+    "cve": "CVE-2021-41773",
+    "service": "http",
+    "summary": "Apache HTTP Server 2.4.49 path traversal and potential RCE allowing attackers to read files outside the document root, and (with mod_cgi) execute code.",
+    "remediation_steps": [
+      "Upgrade Apache HTTP Server to 2.4.51 or later.",
+      "Ensure directory configurations require 'Require all denied' with explicit grants rather than relying on the default.",
+      "Disable mod_cgi if CGI execution is not required.",
+      "Review access logs for encoded path-traversal sequences ('..%2f') and check for compromise."
+    ]
+  },
+  {
+    "cve": "CVE-2024-4577",
+    "service": "http",
+    "summary": "PHP CGI argument injection on Windows (best-fit character mapping of a soft hyphen to a hyphen) allowing remote code execution, bypassing the older CVE-2012-1823 fix.",
+    "remediation_steps": [
+      "Upgrade PHP to 8.0.30 (for the 8.0 branch) or move to a patched 8.1/8.2/8.3 release.",
+      "If PHP-CGI on Windows cannot be upgraded immediately, apply the official workaround and block the argument-injection character.",
+      "Prefer PHP-FPM over PHP-CGI where possible, especially on Windows.",
+      "Restrict access to the PHP endpoint and audit logs for the specific byte sequence used in exploits."
+    ]
+  },
+  {
+    "cve": null,
+    "service": "mongodb",
+    "summary": "MongoDB instance exposed without authentication, allowing anyone with network access to read, modify, or delete the entire database.",
+    "remediation_steps": [
+      "Enable authentication with '--auth' and create dedicated least-privilege application users.",
+      "Bind mongod to the internal interface only and never expose port 27017 to the internet.",
+      "Enable TLS for client connections and inter-node replication traffic.",
+      "Apply network segmentation and firewall rules so only application servers can reach the database."
+    ]
+  },
+  {
+    "cve": null,
+    "service": "docker",
+    "summary": "Docker Engine API exposed without TLS or authentication on port 2375, allowing unauthenticated attackers to spawn privileged containers and escape to the host.",
+    "remediation_steps": [
+      "Disable the unencrypted remote API; never bind the Docker daemon to 0.0.0.0:2375.",
+      "If remote access is required, enable TLS mutual authentication on port 2376 with client certificates.",
+      "Place the Docker daemon behind a firewall reachable only from trusted management hosts.",
+      "Audit container images and host filesystem for persistence if exposure is confirmed."
+    ]
+  },
+  {
+    "cve": null,
+    "service": "mysql",
+    "summary": "MySQL instance with an anonymous account and a weak root password, allowing trivial unauthorized database access from the network.",
+    "remediation_steps": [
+      "Remove anonymous accounts ('DELETE FROM mysql.user WHERE User=\"\"') and set a strong root password.",
+      "Apply the principle of least privilege: create dedicated application users with only the privileges they need.",
+      "Bind mysqld to the internal interface and restrict port 3306 with a firewall.",
+      "Enable TLS and audit login attempts; rotate credentials for any data that may have been accessed."
+    ]
+  },
+  {
+    "cve": null,
+    "service": "http",
+    "summary": "Generic web application misconfiguration guidance: exposed administrative interfaces, default credentials, or outdated application stacks without a specific CVE.",
+    "remediation_steps": [
+      "Remove or restrict administrative interfaces (e.g., manager consoles, /admin) to trusted internal networks or VPN.",
+      "Replace all default credentials with strong, unique passwords and enforce MFA where available.",
+      "Keep the application stack and all plugins/themes up to date; remove unused components.",
+      "Add a reverse proxy / WAF in front and enforce TLS for all traffic."
+    ]
+  },
+  {
+    "cve": null,
+    "service": "ssh",
+    "summary": "General SSH service hardening guidance for patched or low-risk SSH exposures.",
+    "remediation_steps": [
+      "Keep OpenSSH fully patched and track upstream security advisories.",
+      "Disable root login ('PermitRootLogin no') and enforce key-based authentication, disabling passwords.",
+      "Restrict sshd access with firewall rules to trusted management networks.",
+      "Enable verbose logging and monitoring for brute-force attempts."
+    ]
+  },
+  {
+    "cve": null,
+    "service": "postgresql",
+    "summary": "General PostgreSQL hardening guidance for a patched, locally-bound instance.",
+    "remediation_steps": [
+      "Keep PostgreSQL patched and listen only on localhost ('listen_addresses') unless remote access is required.",
+      "Use SCRAM-SHA-256 password authentication and least-privilege roles.",
+      "Require TLS for any remote connections and restrict access with firewall rules.",
+      "Regularly review pg_hba.conf for overly permissive rules."
+    ]
+  },
+  {
+    "cve": null,
+    "service": "redis",
+    "summary": "General Redis hardening guidance for a patched, authenticated instance.",
+    "remediation_steps": [
+      "Keep Redis patched and enable authentication with strong ACL users.",
+      "Bind Redis to localhost or internal interfaces only.",
+      "Disable unneeded dangerous commands via rename-command (CONFIG, FLUSHALL, EVAL).",
+      "Enable TLS if Redis must be reached across a network."
+    ]
+  }
+]

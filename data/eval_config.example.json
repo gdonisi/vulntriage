@@ -1,0 +1,14 @@
+{
+  "input_path": "data/synthetic_findings.json",
+  "asset_registry": "data/assets.yaml",
+  "kb_path": "data/cve_kb.json",
+  "models": [
+    { "provider": "lmstudio", "model": "qwen3.5-4b" },
+    { "provider": "ollama", "model": "qwen3:8b" },
+    { "provider": "openrouter", "model": "deepseek/deepseek-v4-flash" }
+  ],
+  "prompt_strategies": ["few-shot", "zero-shot"],
+  "rag_conditions": [true, false],
+  "repeats": 3,
+  "output_dir": "output/eval"
+}
