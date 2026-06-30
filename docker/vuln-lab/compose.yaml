@@ -1,0 +1,25 @@
+name: vuln-lab
+
+services:
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    container_name: dvwa
+    ports:
+      - "127.0.0.1:4280:80"
+    networks:
+      - vuln-net
+    restart: unless-stopped
+
+  gitea:
+    image: vulhub/gitea:1.4.0
+    container_name: gitea
+    networks:
+      - vuln-net
+    ports:
+      - "3000:3000"
+      - "20022:22"
+    restart: unless-stopped
+
+networks:
+  vuln-net:
+    external: true

@@ -29,9 +29,13 @@ OPENAI_API_KEY=sk-... uv run python main.py --input data/synthetic_findings.json
     --provider openai --model gpt-5.4-nano --reasoning-effort high
 
 # Run the dockerized Nuclei scanner first, then triage
+docker network create -d bridge vuln-net
 docker build -t my-nuclei:latest docker/nuclei
 uv run python main.py --scan nuclei --target 192.168.1.5 \
     --provider lmstudio --model qwen3.5-4b
+
+# Only run the Nuclei scan, save output and exit
+uv run python main.py --scan nuclei --target 192.168.1.5 --scan-only
 ```
 
 ## Pipeline

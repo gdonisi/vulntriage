@@ -90,9 +90,9 @@ pyproject.toml         # Dependencies (pydantic, httpx, openai)
 
 ## Validation
 
-- **Smoke test**: Run `uv run python main.py --input data/synthetic_findings.json --provider lmstudio --model llama-3.2-3b` and confirm a ranked report prints.
+- **Smoke test**: Run `uv run python main.py --input data/synthetic_findings.json --provider lmstudio --model qwen3.5-4b` and confirm a ranked report prints.
 - **Provider swap**: Run the same command with `--provider openrouter --model openai/gpt-4o` and confirm it works identically.
-- **Nuclei path**: Run `uv run python main.py --input data/sample_nuclei.jsonl --provider lmstudio --model llama-3.2-3b` and confirm Nuclei findings parse and enrich correctly.
+- **Nuclei path**: Run `uv run python main.py --input data/sample_nuclei.jsonl --provider lmstudio --model qwen3.5-4b` and confirm Nuclei findings parse and enrich correctly.
 - **Latency logging**: Confirm each LLM call logs its duration (for thesis time-efficiency metric).
 - **Output inspection**: Manually review 2–3 enriched findings for hallucination or nonsense.
 - **Reproducibility**: `uv run python main.py --help` works from a fresh clone after `uv sync`.

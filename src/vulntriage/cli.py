@@ -1,12 +1,18 @@
 """CLI entry point: orchestrates the full triage pipeline.
 
     uv run python main.py --input data/synthetic_findings.json \
-        --provider lmstudio --model llama-3.2-3b
+        --provider lmstudio --model qwen3.5-4b
 
 To run the dockerized Nuclei scanner instead of reading a file:
 
     uv run python main.py --scan nuclei --target 192.168.1.5 \
-        --provider lmstudio --model llama-3.2-3b
+        --provider lmstudio --model qwen3.5-4b
+
+To only run the nuclei scan and save output (skip triage pipeline):
+
+    uv run python main.py --scan nuclei --target 192.168.1.5 \
+        --scan-only \
+        --provider lmstudio --model qwen3.5-4b
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from .enricher import enrich_all
@@ -40,7 +47,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", help="Target for --scan")
     p.add_argument(
         "--provider",
-        required=True,
         choices=[
             "lmstudio",
             "ollama",
@@ -49,8 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
             "openai",
             "openrouter",
         ],
+        help="LLM provider (required unless --scan-only is set)",
     )
-    p.add_argument("--model", required=True, help="Model name for the chosen provider")
+    p.add_argument(
+        "--model", help="Model name for the chosen provider (required unless --scan-only is set)"
+    )
     p.add_argument(
         "--reasoning-effort",
         choices=["low", "medium", "high"],
@@ -67,21 +76,37 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Directory to dump enriched/scored JSON for evaluation",
     )
+    p.add_argument(
+        "--scan-only",
+        action="store_true",
+        help="Only run the scanner and save output; skip the triage pipeline. Use with --scan.",
+    )
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
+    # --provider and --model are optional when scanning only.
+    if not args.scan_only and (not args.provider or not args.model):
+        print("--provider and --model are required for the triage pipeline", file=sys.stderr)
+        return 2
+
     # 1. Acquire scanner results.
     if args.scan == "nuclei":
         if not args.target:
             print("--scan requires --target", file=sys.stderr)
             return 2
-        out_path = Path("data/nuclei_scan.jsonl")
+        out_path = Path(f"data/nuclei_scan_{int(time.time())}.jsonl")
         run_nuclei(args.target, out_path)
+        print(f"[pipeline] nuclei scan output saved to {out_path.resolve()}")
+        if args.scan_only:
+            return 0
         input_path = str(out_path)
     else:
+        if args.scan_only:
+            print("--scan-only requires --scan nuclei", file=sys.stderr)
+            return 2
         input_path = args.input
 
     findings = parse(input_path)

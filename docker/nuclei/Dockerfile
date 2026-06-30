@@ -3,7 +3,7 @@
 FROM projectdiscovery/nuclei:v3
 
 # Nuclei official image uses Alpine, adding optional dependencies
-RUN apk update && apk add --no-cache bash python3 php go ruby
+RUN apk update && apk add --no-cache bash curl python3 php go ruby
 
 # To avoid having to install the templates every time the program starts
 RUN nuclei -ut

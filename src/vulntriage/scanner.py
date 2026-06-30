@@ -11,8 +11,99 @@ Usage:
 
 from __future__ import annotations
 
+import ipaddress
+import re
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
+
+_DOCKER_NETWORK = "vuln-net"
+
+
+class _DockerResolveResult(NamedTuple):
+    hostname: str
+    ip: str | None
+
+
+def _is_ip(s: str) -> bool:
+    """Return True if *s* is a bare IPv4 address."""
+    try:
+        ipaddress.IPv4Address(s)
+        return True
+    except ipaddress.AddressValueError:
+        return False
+
+
+def _extract_host(s: str) -> str:
+    """Extract the bare hostname/IP from a target string.
+
+    Handles:
+      - ``hostname``         -> ``hostname``
+      - ``hostname:port``    -> ``hostname``
+      - ``http://hostname``  -> ``hostname``
+      - ``http://h:8080/p``  -> ``h``
+      - ``192.168.1.1``      -> ``192.168.1.1`` (passthrough)
+    """
+    # Strip scheme
+    no_scheme = re.sub(r"^https?://", "", s)
+    # Strip port and path
+    host = no_scheme.split(":", 1)[0] if ":" in no_scheme else no_scheme
+    # Remove any trailing slash/path
+    host = host.split("/", 1)[0]
+    return host
+
+
+def _is_single_label_hostname(s: str) -> bool:
+    """Return True if *s* contains a bare hostname (no dots, not an IP)."""
+    host = _extract_host(s)
+    return "." not in host and not _is_ip(host)
+
+
+def _resolve_docker_hostname(hostname: str) -> str | None:
+    """Resolve a container name to its IP on the Docker network.
+
+    Uses ``docker inspect`` on the host (requires docker CLI and
+    the container to be running on ``vuln-net``).  Returns ``None``
+    when the container is not found / not on the expected network.
+    """
+    clean = _extract_host(hostname)
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                clean,
+                "--format",
+                "{{index .NetworkSettings.Networks \""
+                + _DOCKER_NETWORK
+                + "\" \"IPAddress\"}}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        ip = result.stdout.strip()
+        return ip if _is_ip(ip) else None
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+
+
+def _resolve_targets(targets: str | list[str]) -> str:
+    """Replace single-label hostnames with their Docker IPs,
+    preserving port/path if present."""
+    items = [targets] if isinstance(targets, str) else targets
+    resolved: list[str] = []
+    for t in items:
+        if _is_single_label_hostname(t):
+            ip = _resolve_docker_hostname(t)
+            if ip:
+                # Reconstruct: replace hostname with IP, keep port/path
+                host = _extract_host(t)
+                resolved.append(t.replace(host, ip, 1))
+                continue
+        resolved.append(t)
+    return ",".join(resolved)
 
 
 def run_nuclei(
@@ -24,6 +115,10 @@ def run_nuclei(
 ) -> Path:
     """Run the dockerized Nuclei image against one or more targets.
 
+    Hostnames that look like bare Docker container names (no dots, no
+    scheme, not an IP) are automatically resolved to their container IP
+    via ``docker inspect`` so that nuclei's httpx can reach them.
+
     Args:
         targets: A single host/URL or a list of them.
         output_path: Where to write the JSONL results.
@@ -34,10 +129,7 @@ def run_nuclei(
     Returns:
         The Path to the written JSONL file.
     """
-    if isinstance(targets, list):
-        target_list = ",".join(targets)
-    else:
-        target_list = targets
+    target_list = _resolve_targets(targets)
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -45,6 +137,7 @@ def run_nuclei(
     cmd = [
         "docker",
         "run",
+        f"--network={_DOCKER_NETWORK}",
         "--rm",
         "-v",
         f"{out.parent.resolve()}:/out",
