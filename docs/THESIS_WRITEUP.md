@@ -69,6 +69,7 @@ SDK and supports six providers via `make_client()` factory:
 - `llamacpp` / `vllm` — local alternatives
 - `openai` — cloud, requires `OPENAI_API_KEY`
 - `openrouter` — cloud, requires `OPENROUTER_API_KEY`
+- `anthropic` / `google` / `deepseek`— cloud alternatives, API key required
 
 Each provider can be configured with `--reasoning-effort low|medium|high` for
 models that support chain-of-thought reasoning. Temperature is fixed at 0.2

@@ -132,9 +132,3 @@ LLM remediation.
 uv run pytest
 uv run pytest --cov=vulntriage
 ```
-
-## Design documents
-
-- v1 design: `docs/specs/2026-06-26-triage-pipeline-design.md`
-- v2 design: `docs/specs/2026-06-30-triage-pipeline-v2-design.md`
-- v2 implementation plan: `docs/plans/2026-06-30-triage-pipeline-v2-plan.md`

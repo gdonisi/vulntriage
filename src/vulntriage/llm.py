@@ -1,7 +1,7 @@
 """LLM client abstraction.
 
-Both LM Studio and OpenRouter expose OpenAI-compatible chat completions
-endpoints, so a single client implementation covers both. The base URL and
+Every provider expose OpenAI-compatible chat completions endpoints,
+so a single client implementation covers both. The base URL and
 API key differ per provider; the model name is passed per call.
 """
 
@@ -100,8 +100,7 @@ def make_client(
     Parameters
     ----------
     provider:
-        One of ``"lmstudio"``, ``"ollama"``, ``"llamacpp"``,
-        ``"vllm"``, ``"openai"``, ``"openrouter"``.
+        API Provider
     model:
         Model name to use.
     reasoning_effort:
@@ -159,9 +158,33 @@ def make_client(
             reasoning_effort=reasoning_effort,
         )
 
+    if provider == "anthropic":
+        return OpenAICompatibleClient(
+            base_url="https://api.anthropic.com/v1/",
+            api_key=_require_env("ANTHROPIC_API_KEY"),
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
+
+    if provider == "google":
+        return OpenAICompatibleClient(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=_require_env("GEMINI_API_KEY"),
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
+
+    if provider == "deepseek":
+        return OpenAICompatibleClient(
+            base_url="https://api.deepseek.com",
+            api_key=_require_env("DEEPSEEK_API_KEY"),
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
+
     msg = (
         f"Unknown provider: {provider!r} "
-        "(expected one of: 'lmstudio', 'ollama', 'llamacpp', "
-        "'vllm', 'openai', 'openrouter')"
+        "(expected one of: 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'openai', "
+        "'openrouter', 'anthropic', 'google', 'deepseek')"
     )
     raise ValueError(msg)
