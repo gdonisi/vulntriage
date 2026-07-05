@@ -63,7 +63,7 @@ prioritizer formula.
 - `complete(system: str, user: str) -> str`
 
 **`OpenAICompatibleClient`** is the real implementation. It wraps the OpenAI
-SDK and supports six providers via `make_client()` factory:
+SDK and supports nine providers via `make_client()` factory:
 - `lmstudio` — local, base URL `http://localhost:1234/v1`
 - `ollama` — local, `http://localhost:11434/v1`
 - `llamacpp` / `vllm` — local alternatives
@@ -72,9 +72,14 @@ SDK and supports six providers via `make_client()` factory:
 - `anthropic` / `google` / `deepseek`— cloud alternatives, API key required
 
 Each provider can be configured with `--reasoning-effort low|medium|high` for
-models that support chain-of-thought reasoning. Temperature is fixed at 0.2
+models that support chain-of-thought reasoning; provider support varies and
+the flag is omitted entirely for standard (non-reasoning) models. Temperature is fixed at 0.2
 for reproducibility. Token usage is captured from API response metadata when
-available.
+available. Each client is tagged with a `local` flag (`True` for self-hosted
+providers, `False` for cloud). It is not part of the request path; the CLI
+`--local-only` flag uses the same `LOCAL_PROVIDERS` set
+(`lmstudio`/`ollama`/`llamacpp`/`vllm`) to refuse cloud providers before any
+network call is made.
 
 ---
 
@@ -183,8 +188,11 @@ Renders findings into reports using a single Jinja2 HTML template
 
 1. **Executive Summary** — total findings, High/Medium/Low counts, top
    priority finding description
-2. **Risk Breakdown** — horizontal bar chart per finding (CSS bars styled by
-   exploitability color: red/orange/green)
+2. **Risk Breakdown** — horizontal bar chart per finding: each bar fill's
+   width is proportional to the finding's risk score (`width = risk_score ×
+   100%`), coloured by exploitability tier (red/orange/green). The `.bar-fill`
+   element is `display: block` so the percentage width applies (inline spans
+   ignore `width`).
 3. **Technical Findings** — per-finding card with host, port, CVE, CVSS, risk
    score, context, exploitability rationale, remediation steps with rationale,
    RAG references
@@ -192,7 +200,11 @@ Renders findings into reports using a single Jinja2 HTML template
    Exploitability, Finding, Host)
 
 WeasyPrint converts the HTML to PDF. Both formats share the same template;
-output is controlled by `--output-format` (text|html|pdf|both).
+output is controlled by `--output-format` (text|html|pdf|both). The composer
+accepts `RemediatedFinding` (full report with `--remediate`) **or** plain
+`PrioritizedFinding` (HTML/PDF rendered without `--remediate`); in the latter
+case remediation fields are read via `getattr` defaults and the remediation
+sections render empty, so `--output-format html/pdf/both` works on its own.
 
 ---
 
@@ -259,8 +271,9 @@ Two baselines are computed alongside every experiment run:
 | RAG | `on` / `off` | Measure the value of grounded knowledge |
 | Repeats | 3 per condition | Capture variance from LLM non-determinism |
 
-Outputs: `output/eval/metrics.json` (per-cell mean + std for each metric) and
-`output/eval/results.csv` (one row per run, 36 + 2 baseline rows).
+Outputs: `output/eval/<ts>/metrics.json` (per-cell mean + std for each metric)
+and `output/eval/<ts>/results.csv` (one row per run, 36 + 2 baseline rows) —
+timestamped so previous eval runs are never overwritten.
 
 ### 10.5 `gt_value` — Ground Truth Priority Value
 
@@ -277,14 +290,15 @@ Single entry point via `main.py`. Command-line flags:
 
 | Flag | v1/v2 | Description |
 |---|---|---|
-| `--input` | v1 | Path to scanner output (XML/JSONL/JSON) |
-| `--scan` | v1 | Run dockerized Nuclei scanner |
+| `--input` | v1 | One or more scanner output files (XML/JSONL/JSON); findings are merged |
+| `--scan` | v1 | Run dockerized Nuclei scanner, then continue to triage (unless `--scan-only`) |
 | `--target` | v1 | Target for `--scan` |
 | `--provider` | v1 | LLM provider (lmstudio/ollama/openai/openrouter/…) |
 | `--model` | v1 | Model name |
-| `--reasoning-effort` | v1 | Thinking level for reasoning models |
+| `--reasoning-effort` | v1 | Thinking/reasoning effort for models that support it (provider support varies) |
+| `--local-only` | v2 | Block cloud providers; only local backends allowed (lmstudio/ollama/llamacpp/vllm) |
 | `--asset-registry` | v1 | YAML file with host→criticality |
-| `--output` | v1 | Output path / directory |
+| `--output` | v1/v2 | Dir for HTML/PDF/eval (default: timestamped under `output/runs` or `output/eval`); file path for text (default: stdout) |
 | `--output-format` | v2 | text/html/pdf/both |
 | `--remediate` | v2 | Run remediation generator |
 | `--rag` / `--no-rag` | v2 | Toggle RAG grounding |
@@ -293,7 +307,7 @@ Single entry point via `main.py`. Command-line flags:
 | `--evaluate` | v2 | Run the evaluation experiment grid |
 | `--eval-config` | v2 | JSON config file for multi-model grid |
 | `--repeats` | v2 | Repeats per condition in eval mode |
-| `--save-intermediates` | v2 | Dump intermediate pipeline outputs |
+| `--save-intermediates` | v2 | Dump intermediate pipeline outputs (optional dir; default `<run_dir>/intermediates/`) |
 | `--scan-only` | v1 | Just scan, skip triage |
 | `--help` | v1/v2 | Show all flags |
 
@@ -321,25 +335,42 @@ CVE-2024-23897 Jenkins) + 7 service-class fallbacks. Each entry has
 ### 12.4 HTML Template (`data/templates/report.html`)
 
 Jinja2 template with inline CSS. Sections: header, executive summary, risk
-breakdown bars, per-finding cards with remediation, ranked table.
+breakdown bars (fill width = risk score × 100%, colour by exploitability),
+per-finding cards with remediation, ranked table.
+
+### 12.5 Output Layout
+
+Each triage run writes to its own timestamped directory so previous results
+are never overwritten:
+
+- **`output/runs/<YYYYMMDD-HHMMSS>/`** — `report.html`, `report.pdf` for
+  `--output-format html|pdf|both` (text still goes to stdout unless `--output`
+  is a file). `--output <dir>` overrides the directory.
+- **`output/eval/<YYYYMMDD-HHMMSS>/`** — `metrics.json`, `results.csv` for
+  `--evaluate` (`--output` or the eval config's `output_dir` override).
+- **`<run_dir>/intermediates/`** — enriched/scored/prioritized/remediated JSON
+  when `--save-intermediates` is passed (with no value, defaults here).
+
+The `output/` tree is tracked in git; `.gitkeep` files keep
+`output/runs/`, `output/reports/`, and `output/eval/` present.
 
 ---
 
 ## 13. Tests
 
-40 tests across 7 test files:
+50 tests across 6 test files:
 
 | File | Tests | What it covers |
 |---|---|---|
-| `test_remediator.py` | 6 | KB loading, CVE lookup, service fallback, empty KB, remediation with/without RAG |
-| `test_report_composer.py` | 4 | HTML renders, PDF generates, executive summary written, findings in output |
+| `test_remediator.py` | 7 | KB loading, CVE lookup, service fallback, empty KB, remediation with/without RAG |
+| `test_report_composer.py` | 6 | HTML renders, PDF generates, executive summary, bar widths scale with risk score, non-remediated render |
 | `test_scorer_fewshot.py` | 4 | Few-shot/zero-shot response parsing, fallback label coercion |
-| `test_evaluation.py` | 7 | Ground truth mapping, metric computation, Spearman, CVSS-only baseline, manual time estimate, full experiment grid |
+| `test_evaluation.py` | 16 | Ground truth mapping, metric computation, Spearman, CVSS-only baseline, manual time estimate, full experiment grid |
 | `test_pipeline_integration.py` | 2 | End-to-end pipeline (parse→enrich→score→prioritize→remediate→compose) with mock client, zero-shot+no-rag variant |
-| `test_cli.py` | 7 | Help text, text/HTML/PDF/both reports, zero-shot+no-rag, save-intermediates, evaluate single-model, error handling |
+| `test_cli.py` | 15 | Help text, text/HTML/PDF/both reports, HTML without `--remediate`, zero-shot+no-rag, save-intermediates (explicit + default path), multi-input merge, `--local-only` (triage + eval), timestamped run dirs, eval timestamped output, evaluate single-model, error handling |
 | `conftest.py` | — | `MockLLMClient` fixture (canned structured JSON responses) |
 
-All tests use mock LLM responses — no real model needed. Coverage: report_composer 100%, remediator 96%, evaluation 85%, cli 83%, models 100%, scorer 79%.
+All tests use mock LLM responses — no real model needed. Coverage: report_composer 100%, remediator 96%, evaluation 87%, cli 86%, models 100%, scorer 79%.
 
 ---
 
@@ -365,6 +396,7 @@ project/
 ├── main.py                          # Entry point → cli.main()
 ├── pyproject.toml                   # Dependencies
 ├── README.md                        # Updated with v2
+├── todo.txt                         # Tracked future-work items
 ├── .gitignore
 ├── data/
 │   ├── assets.yaml                  # Host→criticality (v1)
@@ -401,13 +433,58 @@ project/
 │   └── test_cli.py
 ├── docs/
 │   ├── specs/
-│   │   ├── 2026-06-26-triage-pipeline-design.md  # v1 design spec
-│   │   └── 2026-06-30-triage-pipeline-v2-design.md  # v2 design spec
+│   │   ├── triage-pipeline-design.md        # v1 design spec
+│   │   └── triage-pipeline-v2-design.md     # v2 design spec
 │   └── plans/
-│       └── 2026-06-30-triage-pipeline-v2-plan.md  # Implementation plan
-├── output/
-│   ├── eval/                        # Experiment results (metrics.json, results.csv)
-│   └── reports/                     # Generated reports (report.html, report.pdf)
+│       └── triage-pipeline-v2-plan.md       # Implementation plan
+├── output/                         # Tracked in git; run outputs never overwritten
+│   ├── runs/<ts>/                  # Per-run HTML/PDF reports (timestamped)
+│   ├── eval/<ts>/                  # Per-run eval metrics.json + results.csv (timestamped)
+│   ├── reports/.gitkeep            # (legacy dir retained)
+│   └── eval/.gitkeep
 └── docker/nuclei/
     └── Dockerfile                   # Nuclei container (v1)
 ```
+
+---
+
+## 16. Known Limitations & Future Work
+
+Items originally tracked in `todo.txt`. The CLI/usability items are now
+implemented; the web frontend remains future work.
+
+**Implemented in this iteration:**
+
+- **Multiple scanner inputs at once** — `--input` accepts one or more files
+  (XML/JSONL/JSON); findings are merged across all of them before triage.
+- **`--local-only` mode** — the `LLMClient` carries a `local` flag
+  (`True` for self-hosted providers); the CLI `--local-only` flag uses
+  `LOCAL_PROVIDERS` (`lmstudio`/`ollama`/`llamacpp`/`vllm`) to refuse cloud
+  providers before any network call, in both triage and `--evaluate` modes.
+- **Scan → triage in one command** — `--scan nuclei --target … --provider …
+  --model …` runs the dockerized Nuclei scan and continues straight into
+  triage; `--scan-only` skips triage.
+- **Run outputs no longer overwritten** — triage reports go to
+  `output/runs/<ts>/` and eval results to `output/eval/<ts>/` (timestamped);
+  `--save-intermediates` (no value) defaults to `<run_dir>/intermediates/`.
+
+**Remaining future work:**
+
+- **Web frontend** — a small webapp exposing the pipeline (upload scan output,
+  trigger triage, view the HTML report) is planned (`frontend-design` skill);
+  the CLI and `compose_report` are already reusable as a library.
+
+**Additional limitations relevant to the thesis evaluation:**
+
+- **Ground truth is CVSS-E maturity, not expert labels** — `X`-maturity
+  findings (9 of 20) are excluded from the accuracy metric but retained for
+  ranking, where they use a manually-assigned `label`. The accuracy and
+  ranking metrics therefore measure against different ground-truth sources;
+  this is by design and should be stated explicitly in the methodology.
+- **Small synthetic dataset (20 findings)** limits statistical weight; report
+  mean ± std over the 3 repeats per cell.
+- **No LLM response cache** — the 36-cell grid re-calls the model; a
+disk cache keyed by `(model, prompt)` would cut cost and improve
+  reproducibility for re-runs.
+- **Temperature fixed at 0.2** — not configurable from the CLI; the v2 design
+  flagged temp=0 for eval runs as a non-determinism mitigation.

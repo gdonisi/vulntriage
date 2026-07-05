@@ -1,0 +1,9 @@
+DONE:
+- multiple scanner outputs at once (--input takes N files, findings merged)
+- 'local only' flag (--local-only blocks cloud providers; see LOCAL_PROVIDERS in llm.py)
+- scan -> triage in one command (--scan nuclei --target ... --provider ... --model ...)
+  (--scan-only skips triage); this already worked, just clarified in --help
+- run outputs no longer overwritten (timestamped output/runs/<ts>/ and output/eval/<ts>/)
+
+TODO:
+- webapp to use the tool (use frontend-design skill)

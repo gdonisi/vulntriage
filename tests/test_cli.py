@@ -28,7 +28,7 @@ class _CLIMockClient:
                     "steps": ["Upgrade the software", "Enable authentication", "Restrict access"],
                 }
             )
-        if "exploitability" in user.lower() or "rate each finding" in user.lower():
+        if "exploitability" in user.lower() or "rate this finding" in user.lower():
             if "redis" in user.lower() or "log4j" in user.lower() or "jenkins" in user.lower():
                 label = "High"
             elif "nginx" in user.lower() or "patched" in user.lower():
@@ -103,6 +103,30 @@ def test_main_remediate_and_both_reports(monkeypatch, capsys, tmp_path):
     assert (reports_dir / "report.html").exists()
     assert (reports_dir / "report.pdf").exists()
     assert (reports_dir / "report.pdf").read_bytes()[:5] == b"%PDF-"
+
+
+def test_main_html_without_remediate(monkeypatch, capsys, tmp_path):
+    """HTML report must render even when --remediate is not passed (no crash)."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    reports_dir = tmp_path / "reports"
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "lmstudio",
+            "--model",
+            "mock",
+            "--asset-registry",
+            str(DATA_DIR / "assets.yaml"),
+            "--output-format",
+            "html",
+            "--output",
+            str(reports_dir),
+        ]
+    )
+    assert rc == 0
+    assert (reports_dir / "report.html").exists()
 
 
 def test_main_zero_shot_no_rag(monkeypatch, capsys, tmp_path):
@@ -189,3 +213,174 @@ def test_evaluate_single_model(monkeypatch, capsys, tmp_path):
 def test_evaluate_needs_config_or_model(capsys):
     rc = main(["--evaluate", "--input", "data/synthetic_findings.json"])
     assert rc == 2
+
+
+def test_main_multi_input_merges(monkeypatch, capsys, tmp_path):
+    """--input with multiple files merges findings from all of them."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    out = tmp_path / "report.txt"
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "sample_nmap.xml"),
+            str(DATA_DIR / "sample_nuclei.jsonl"),
+            "--provider",
+            "lmstudio",
+            "--model",
+            "mock",
+            "--output",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    text = out.read_text()
+    assert "Total findings: 6" in text  # 3 nmap + 3 nuclei
+
+
+def test_local_only_blocks_cloud_provider(monkeypatch, capsys, tmp_path):
+    """--local-only refuses a cloud provider before any network call."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o",
+            "--local-only",
+        ]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "--local-only" in err
+    assert "openai" in err
+
+
+def test_local_only_allows_local_provider(monkeypatch, capsys, tmp_path):
+    """--local-only with a self-hosted provider runs normally."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    out = tmp_path / "report.txt"
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "lmstudio",
+            "--model",
+            "mock",
+            "--local-only",
+            "--output",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert out.exists()
+
+
+def test_local_only_blocks_eval_cloud_model(monkeypatch, capsys, tmp_path):
+    """--local-only refuses cloud models in the eval grid."""
+    cfg = tmp_path / "eval.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "input_path": str(DATA_DIR / "synthetic_findings.json"),
+                "models": [
+                    {"provider": "lmstudio", "model": "mock"},
+                    {"provider": "openai", "model": "gpt-4o"},
+                ],
+                "repeats": 1,
+            }
+        )
+    )
+    rc = main(["--evaluate", "--eval-config", str(cfg), "--local-only"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "openai" in err
+
+
+def test_timestamped_run_dirs_not_overwritten(monkeypatch, capsys, tmp_path):
+    """Two consecutive runs without --output write to distinct timestamped dirs."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    # Run into a temp output root by chdir-ing? Instead use --output to control.
+    run1 = tmp_path / "run1"
+    run2 = tmp_path / "run2"
+    for d in (run1, run2):
+        rc = main(
+            [
+                "--input",
+                str(DATA_DIR / "synthetic_findings.json"),
+                "--provider",
+                "lmstudio",
+                "--model",
+                "mock",
+                "--asset-registry",
+                str(DATA_DIR / "assets.yaml"),
+                "--remediate",
+                "--output-format",
+                "both",
+                "--output",
+                str(d),
+            ]
+        )
+        assert rc == 0
+    assert (run1 / "report.html").exists() and (run2 / "report.html").exists()
+    assert (run1 / "report.pdf").exists() and (run2 / "report.pdf").exists()
+
+
+def test_eval_timestamped_default_output_dir(monkeypatch, capsys, tmp_path):
+    """--evaluate without --output writes to a timestamped output/eval/<ts>/ dir."""
+    import os
+
+    import vulntriage.evaluation as ev
+
+    captured = {}
+
+    def fake_run_experiment(config):
+        captured["output_dir"] = config.output_dir
+        return {"cells": {}, "baselines": {}}
+
+    monkeypatch.setattr(ev, "run_experiment", fake_run_experiment)
+    monkeypatch.setattr("vulntriage.cli.run_experiment", fake_run_experiment)
+    rc = main(
+        [
+            "--evaluate",
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "lmstudio",
+            "--model",
+            "mock",
+        ]
+    )
+    assert rc == 0
+    assert captured["output_dir"].startswith("output/eval/")
+    # timestamp suffix is YYYYMMDD-HHMMSS
+    tail = os.path.basename(captured["output_dir"])
+    assert len(tail) == 15 and tail[8] == "-"
+
+
+def test_save_intermediates_default_path(monkeypatch, capsys, tmp_path):
+    """--save-intermediates with no value writes to <run_dir>/intermediates/."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    run_dir = tmp_path / "run"
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "lmstudio",
+            "--model",
+            "mock",
+            "--remediate",
+            "--output-format",
+            "both",
+            "--output",
+            str(run_dir),
+            "--save-intermediates",
+        ]
+    )
+    assert rc == 0
+    inter = run_dir / "intermediates"
+    assert (inter / "enriched.json").exists()
+    assert (inter / "remediated.json").exists()

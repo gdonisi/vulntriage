@@ -283,7 +283,9 @@ class ExperimentConfig:
     prompt_strategies: list[str] = field(default_factory=lambda: ["few-shot", "zero-shot"])
     rag_conditions: list[bool] = field(default_factory=lambda: [True, False])
     repeats: int = 3
-    output_dir: str = "output/eval"
+    # ``None`` (default) => a timestamped ``output/eval/<ts>/`` dir is used per
+    # run so previous results are never overwritten.
+    output_dir: str | None = None
 
 
 def _agg(values: list[float]) -> dict[str, float]:
@@ -298,8 +300,10 @@ def _agg(values: list[float]) -> dict[str, float]:
 
 def run_experiment(config: ExperimentConfig) -> dict:
     """Run the full experiment grid and write metrics.json + results.csv."""
+    from datetime import datetime
+
     ground_truth = load_ground_truth(config.input_path)
-    out_dir = Path(config.output_dir)
+    out_dir = Path(config.output_dir or f"output/eval/{datetime.now().strftime('%Y%m%d-%H%M%S')}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     metric_keys = [
@@ -417,7 +421,7 @@ def load_config(path: str | Path) -> ExperimentConfig:
           "prompt_strategies": ["few-shot", "zero-shot"],
           "rag_conditions": [true, false],
           "repeats": 3,
-          "output_dir": "output/eval"
+          "output_dir": "output/eval"  // optional; null/omitted => output/eval/<timestamp>/
         }
     """
     data = json.loads(Path(path).read_text())
@@ -430,5 +434,5 @@ def load_config(path: str | Path) -> ExperimentConfig:
         prompt_strategies=data.get("prompt_strategies", ["few-shot", "zero-shot"]),
         rag_conditions=data.get("rag_conditions", [True, False]),
         repeats=data.get("repeats", 3),
-        output_dir=data.get("output_dir", "output/eval"),
+        output_dir=data.get("output_dir"),
     )

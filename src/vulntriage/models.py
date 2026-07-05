@@ -1,7 +1,8 @@
 """Pydantic data models for the vulnerability triage pipeline.
 
 Each module takes one of these models and returns the next, forming a linear
-pipeline: RawFinding -> EnrichedFinding -> ScoredFinding -> PrioritizedFinding.
+pipeline:
+    RawFinding -> EnrichedFinding -> ScoredFinding -> PrioritizedFinding -> RemediatedFinding
 """
 
 from __future__ import annotations

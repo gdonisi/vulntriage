@@ -1,7 +1,9 @@
 """Exploitability Assessor.
 
-Asks the LLM to rate how exploitable each finding is using few-shot examples,
-returning a High/Medium/Low label with a short rationale.
+Asks the LLM to rate how exploitable each finding is, returning a
+High/Medium/Low label with a short rationale. Supports few-shot prompting
+(the default, with two worked examples) and zero-shot prompting (examples
+omitted) via the ``few_shot`` parameter.
 """
 
 from __future__ import annotations

@@ -41,6 +41,12 @@ class OpenAICompatibleClient:
         Pass ``None`` (default) to disable reasoning entirely (the
         standard behaviour of non-reasoning models). Set to
         ``"low"``, ``"medium"``, or ``"high"``.  Provider support varies.
+    local:
+        ``True`` for self-hosted providers (lmstudio, ollama, llamacpp,
+        vllm), ``False`` for cloud providers (openai, openrouter, …).
+        Marks whether the provider is self-hosted; reserved for an
+        upcoming ``--local-only`` mode that blocks cloud providers
+        (see ``todo.txt``). Not used in the request path yet.
     """
 
     def __init__(
@@ -50,9 +56,12 @@ class OpenAICompatibleClient:
         api_key: str | None,
         model: str,
         reasoning_effort: str | None = None,
+        local: bool,
     ) -> None:
         self.model = model
         self._reasoning_effort = reasoning_effort
+        # Whether this provider is self-hosted (reserved for --local-only; see todo.txt).
+        self._local = local
         self._client = OpenAI(base_url=base_url, api_key=api_key or "none")
         # Best-effort running total of tokens consumed across all calls.
         self.total_tokens: int = 0
@@ -90,6 +99,16 @@ def _require_env(name: str) -> str:
     return value
 
 
+# Self-hosted providers (the same set that sets ``local=True`` on the client).
+# Used by the CLI ``--local-only`` flag to block cloud providers.
+LOCAL_PROVIDERS = {"lmstudio", "ollama", "llamacpp", "vllm"}
+
+
+def is_local_provider(provider: str) -> bool:
+    """Return True if *provider* is a self-hosted (local) provider."""
+    return provider.strip().lower() in LOCAL_PROVIDERS
+
+
 def make_client(
     provider: str,
     model: str,
@@ -116,6 +135,7 @@ def make_client(
             api_key=os.environ.get("LMSTUDIO_API_KEY", "lm-studio"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=True,
         )
 
     if provider == "ollama":
@@ -124,6 +144,7 @@ def make_client(
             api_key=os.environ.get("OLLAMA_API_KEY", "ollama"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=True,
         )
 
     if provider in {"llamacpp", "llama.cpp"}:
@@ -132,6 +153,7 @@ def make_client(
             api_key=os.environ.get("LLAMACPP_API_KEY", "llama.cpp"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=True,
         )
 
     if provider == "vllm":
@@ -140,6 +162,7 @@ def make_client(
             api_key=os.environ.get("VLLM_API_KEY", "vllm"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=True,
         )
 
     if provider == "openai":
@@ -148,6 +171,7 @@ def make_client(
             api_key=_require_env("OPENAI_API_KEY"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=False,
         )
 
     if provider == "openrouter":
@@ -156,6 +180,7 @@ def make_client(
             api_key=_require_env("OPENROUTER_API_KEY"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=False,
         )
 
     if provider == "anthropic":
@@ -164,6 +189,7 @@ def make_client(
             api_key=_require_env("ANTHROPIC_API_KEY"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=False,
         )
 
     if provider == "google":
@@ -172,6 +198,7 @@ def make_client(
             api_key=_require_env("GEMINI_API_KEY"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=False,
         )
 
     if provider == "deepseek":
@@ -180,6 +207,7 @@ def make_client(
             api_key=_require_env("DEEPSEEK_API_KEY"),
             model=model,
             reasoning_effort=reasoning_effort,
+            local=False,
         )
 
     msg = (

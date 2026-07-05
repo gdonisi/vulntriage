@@ -30,7 +30,7 @@ class MockLLMClient:
                     ],
                 }
             )
-        if "Rate each finding" in user or "exploitability" in user.lower():
+        if "rate this finding" in user.lower() or "exploitability" in user.lower():
             # Decide a label from the description to keep tests deterministic.
             if "redis" in user.lower() or "log4j" in user.lower() or "jenkins" in user.lower():
                 label = "High"

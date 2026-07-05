@@ -17,10 +17,18 @@ uv run python main.py --input data/synthetic_findings.json \
     --asset-registry data/assets.yaml \
     --remediate --output-format both
 
+# Merge findings from multiple scanner outputs at once
+uv run python main.py --input data/sample_nmap.xml data/sample_nuclei.jsonl \
+    --provider lmstudio --model qwen3.5-4b --remediate --output-format both
+
 # v1-style plain-text report (no remediation)
 uv run python main.py --input data/synthetic_findings.json \
     --provider lmstudio --model qwen3.5-4b \
     --asset-registry data/assets.yaml
+
+# Block cloud providers (only self-hosted backends)
+uv run python main.py --input data/synthetic_findings.json \
+    --provider lmstudio --model qwen3.5-4b --local-only
 
 # Using Nuclei JSONL output
 uv run python main.py --input data/sample_nuclei.jsonl \
@@ -39,7 +47,8 @@ uv run python main.py --input data/synthetic_findings.json \
     --provider lmstudio --model qwen3.5-4b --remediate --no-rag \
     --prompt-strategy zero-shot
 
-# Run the dockerized Nuclei scanner first, then triage
+# Run the dockerized Nuclei scanner, then continue straight into triage
+# (--scan-only would stop after the scan and save the JSONL)
 docker network create -d bridge vuln-net
 docker build -t my-nuclei:latest docker/nuclei
 uv run python main.py --scan nuclei --target 192.168.1.5 \
@@ -48,6 +57,23 @@ uv run python main.py --scan nuclei --target 192.168.1.5 \
 # Only run the Nuclei scan, save output and exit
 uv run python main.py --scan nuclei --target 192.168.1.5 --scan-only
 ```
+
+## Output layout
+
+Each triage run writes to its own timestamped directory so previous results
+are never overwritten:
+
+- `output/runs/<YYYYMMDD-HHMMSS>/report.html`, `report.pdf` — HTML/PDF
+  reports (text still goes to stdout unless `--output` is a file). Pass
+  `--output <dir>` to choose a specific run directory instead.
+- `output/eval/<YYYYMMDD-HHMMSS>/metrics.json`, `results.csv` — experiment
+  grid outputs. Pass `--output <dir>` (or `output_dir` in the eval config) to
+  override.
+- `--save-intermediates` (with no value) dumps the enriched/scored/
+  prioritized/remediated JSON to `<run_dir>/intermediates/`.
+
+The `output/` tree is tracked in git; `.gitkeep` files keep the
+`output/runs/`, `output/reports/`, and `output/eval/` directories present.
 
 ## Evaluation harness
 
@@ -73,7 +99,7 @@ wall-clock latency, modelled manual-triage time, and token usage.
 
 ```
 Scanner output (Nmap XML / Nuclei JSONL / synthetic JSON)
-  -> Parser              -> List[RawFinding]
+  -> Parser (1+ files)    -> List[RawFinding]   # findings merged across inputs
   -> Context Enricher    (LLM)         -> List[EnrichedFinding]
   -> Exploitability Scorer (LLM)       -> List[ScoredFinding]
   -> Prioritizer         (formula)     -> List[PrioritizedFinding]
@@ -94,7 +120,7 @@ Scanner output (Nmap XML / Nuclei JSONL / synthetic JSON)
 | Report Composer | `src/vulntriage/report_composer.py` | `List[RemediatedFinding]` -> HTML + PDF |
 | Plain-text Reporter | `src/vulntriage/reporter.py` | `List[PrioritizedFinding]` -> text report |
 | Eval harness | `src/vulntriage/evaluation.py` | dataset + ground truth -> metrics JSON/CSV |
-| LLM client | `src/vulntriage/llm.py` | OpenAI-compatible (LM Studio / Ollama / OpenRouter / OpenAI) |
+| LLM client | `src/vulntriage/llm.py` | OpenAI-compatible (LM Studio / Ollama / OpenRouter / OpenAI / …); `--local-only` gates cloud providers |
 
 ## Risk score formula
 

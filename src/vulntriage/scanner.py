@@ -74,9 +74,7 @@ def _resolve_docker_hostname(hostname: str) -> str | None:
                 "inspect",
                 clean,
                 "--format",
-                "{{index .NetworkSettings.Networks \""
-                + _DOCKER_NETWORK
-                + "\" \"IPAddress\"}}",
+                '{{index .NetworkSettings.Networks "' + _DOCKER_NETWORK + '" "IPAddress"}}',
             ],
             capture_output=True,
             text=True,

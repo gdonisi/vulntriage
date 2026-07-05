@@ -6,12 +6,13 @@ a PDF report (via WeasyPrint). Both formats share a single HTML template.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .models import RemediatedFinding
+from .models import PrioritizedFinding
 
 _DEFAULT_TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "templates"
 _DEFAULT_TEMPLATE_NAME = "report.html"
@@ -19,8 +20,14 @@ _DEFAULT_TEMPLATE_NAME = "report.html"
 _BAR_COLORS = {"High": "#c0392b", "Medium": "#d68910", "Low": "#1e8449"}
 
 
-def _build_context(findings: list[RemediatedFinding]) -> dict:
-    """Build the Jinja2 context dict from a list of remediated findings."""
+def _build_context(findings: Sequence[PrioritizedFinding]) -> dict:
+    """Build the Jinja2 context dict from a list of findings.
+
+    Accepts ``RemediatedFinding`` (full report) or plain ``PrioritizedFinding``
+    (HTML/PDF report rendered without ``--remediate``); remediation fields are
+    read via ``getattr`` so the template renders with empty remediation
+    sections when the finding was not remediated.
+    """
     high = sum(1 for f in findings if f.exploitability.value == "High")
     medium = sum(1 for f in findings if f.exploitability.value == "Medium")
     low = sum(1 for f in findings if f.exploitability.value == "Low")
@@ -56,9 +63,9 @@ def _build_context(findings: list[RemediatedFinding]) -> dict:
                 "exploitability": f.exploitability.value,
                 "context": f.context,
                 "exploitability_rationale": f.exploitability_rationale,
-                "remediation_steps": f.remediation_steps,
-                "remediation_rationale": f.remediation_rationale,
-                "rag_hits": f.rag_hits,
+                "remediation_steps": getattr(f, "remediation_steps", []),
+                "remediation_rationale": getattr(f, "remediation_rationale", ""),
+                "rag_hits": getattr(f, "rag_hits", []),
                 "bar_color": _BAR_COLORS.get(f.exploitability.value, "#888"),
             }
         )
@@ -87,7 +94,7 @@ def _make_env(template_dir: str | Path | None = None) -> Environment:
 
 
 def render_html(
-    findings: list[RemediatedFinding],
+    findings: Sequence[PrioritizedFinding],
     *,
     template_dir: str | Path | None = None,
 ) -> str:
@@ -98,7 +105,7 @@ def render_html(
 
 
 def write_html(
-    findings: list[RemediatedFinding],
+    findings: Sequence[PrioritizedFinding],
     path: str | Path,
     *,
     template_dir: str | Path | None = None,
@@ -111,7 +118,7 @@ def write_html(
 
 
 def write_pdf(
-    findings: list[RemediatedFinding],
+    findings: Sequence[PrioritizedFinding],
     path: str | Path,
     *,
     template_dir: str | Path | None = None,
@@ -127,7 +134,7 @@ def write_pdf(
 
 
 def compose(
-    findings: list[RemediatedFinding],
+    findings: Sequence[PrioritizedFinding],
     html_path: str | Path | None = None,
     pdf_path: str | Path | None = None,
     *,
