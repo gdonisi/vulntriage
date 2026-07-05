@@ -1,0 +1,390 @@
+"""FastAPI app: local web interface for the vulntriage pipeline.
+
+Run with::
+
+    uv run uvicorn vulntriage.webapp.app:app --reload
+    # or
+    uv run python main.py --web
+
+Serves a "Case File" UI (see ``static/style.css`` and ``templates/``) over the
+filesystem run layout under ``output/runs/`` and ``output/eval/``.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from ..llm import LOCAL_PROVIDERS, is_local_provider
+from . import runs as runs_mod
+
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = BASE_DIR / "templates"
+STATIC_DIR = BASE_DIR / "static"
+
+DATA_DIR = BASE_DIR.parent.parent.parent / "data"
+SAMPLE_INPUT = DATA_DIR / "synthetic_findings.json"
+ASSET_REGISTRY_DEFAULT = "data/assets.yaml"
+KB_DEFAULT = "data/cve_kb.json"
+
+PROVIDERS = [
+    "lmstudio",
+    "ollama",
+    "llamacpp",
+    "vllm",
+    "openai",
+    "openrouter",
+    "anthropic",
+    "google",
+    "deepseek",
+]
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Create run dirs and recover interrupted on-disk runs on startup."""
+    runs_mod.RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+    runs_mod.EVAL_ROOT.mkdir(parents=True, exist_ok=True)
+    runs_mod.recover_interrupted()
+    yield
+
+
+app = FastAPI(title="vulntriage", docs_url=None, redoc_url=None, lifespan=_lifespan)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+def stamp_word(state: str) -> str:
+    """Map a run state to the rubber-stamp label."""
+    return {
+        "pending": "Filed",
+        "running": "In Review",
+        "done": "Reviewed",
+        "failed": "Failed",
+        "interrupted": "Halted",
+    }.get(state, state)
+
+
+templates.env.globals["stamp_word"] = stamp_word
+
+
+def _basename(path: str) -> str:
+    from pathlib import Path
+
+    return Path(path).name
+
+
+templates.env.filters["basename"] = _basename
+
+
+def _render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
+    """Render a template with the request bound (Starlette 1.x API)."""
+    return templates.TemplateResponse(request, name, ctx)
+
+
+def _providers_for_view(local_only: bool) -> list[dict[str, Any]]:
+    return [
+        {"name": p, "local": is_local_provider(p)}
+        for p in PROVIDERS
+        if (not local_only or is_local_provider(p))
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard(request: Request) -> HTMLResponse:
+    live = sorted(runs_mod.registry.all_runs(), key=lambda r: r.run_id, reverse=True)
+    triage_dirs = runs_mod.list_run_dirs()
+    eval_dirs = runs_mod.list_eval_dirs()
+    # Merge live and on-disk, preferring live records.
+    seen = {r.run_id for r in live}
+    on_disk: list[runs_mod.RunRecord] = []
+    for d in triage_dirs:
+        if d.name in seen:
+            continue
+        on_disk.append(runs_mod.record_from_disk(d.name, "triage"))
+    eval_on_disk: list[runs_mod.RunRecord] = []
+    for d in eval_dirs:
+        if d.name in seen:
+            continue
+        eval_on_disk.append(runs_mod.record_from_disk(d.name, "eval"))
+    return _render(
+        request,
+        "dashboard.html",
+        triage_runs=live + on_disk,
+        eval_runs=eval_on_disk,
+        sample_available=SAMPLE_INPUT.exists(),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Triage runs
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/runs", response_class=HTMLResponse)
+def runs_list(request: Request) -> HTMLResponse:
+    live = sorted(runs_mod.registry.all_runs(), key=lambda r: r.run_id, reverse=True)
+    seen = {r.run_id for r in live if r.kind == "triage"}
+    on_disk = [runs_mod.record_from_disk(d.name, "triage") for d in runs_mod.list_run_dirs()]
+    on_disk = [r for r in on_disk if r.run_id not in seen]
+    return _render(request, "runs_list.html", runs=live + on_disk)
+
+
+@app.get("/runs/new", response_class=HTMLResponse)
+def run_new_form(request: Request) -> HTMLResponse:
+    return _render(
+        request,
+        "run_new.html",
+        providers=_providers_for_view(local_only=False),
+        local_providers=sorted(LOCAL_PROVIDERS),
+        prompt_strategies=["few-shot", "zero-shot"],
+        kb_default=KB_DEFAULT,
+        asset_default=ASSET_REGISTRY_DEFAULT,
+        sample_available=SAMPLE_INPUT.exists(),
+    )
+
+
+@app.post("/runs/new")
+async def run_new_submit(
+    mode: str = Form("dataset"),
+    files: list[UploadFile] = File(default_factory=list),  # noqa: B008
+    use_sample: bool = Form(False),
+    scan_target: str = Form(""),
+    provider: str = Form(...),
+    model: str = Form(...),
+    reasoning_effort: str = Form(""),
+    local_only: bool = Form(False),
+    remediate: bool = Form(False),
+    use_rag: bool = Form(True),
+    kb_path: str = Form(KB_DEFAULT),
+    prompt_strategy: str = Form("few-shot"),
+    asset_registry: str = Form(""),
+    save_intermediates: bool = Form(False),
+) -> RedirectResponse:
+    _validate_provider(provider, local_only)
+
+    reasoning = reasoning_effort or None
+    asset = asset_registry or None
+
+    if mode == "scan":
+        if not scan_target:
+            raise HTTPException(status_code=400, detail="Scan mode requires a target.")
+        run_id = runs_mod.start_triage_scan(
+            target=scan_target,
+            provider=provider,
+            model=model,
+            reasoning_effort=reasoning,
+            local_only=local_only,
+            remediate=remediate,
+            use_rag=use_rag,
+            kb_path=kb_path,
+            prompt_strategy=prompt_strategy,
+            asset_registry=asset,
+            save_intermediates=save_intermediates,
+        )
+        return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+
+    # dataset mode: uploads or sample.
+    input_paths: list[str] = []
+    run_ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    for i, uf in enumerate(files):
+        if not uf.filename:
+            continue
+        saved = runs_mod.RUNS_ROOT / run_ts / f"upload_{i}_{uf.filename}"
+        saved.parent.mkdir(parents=True, exist_ok=True)
+        saved.write_bytes(await uf.read())
+        input_paths.append(str(saved))
+    if use_sample and SAMPLE_INPUT.exists():
+        input_paths.insert(0, str(SAMPLE_INPUT))
+    if not input_paths:
+        # Clean the empty upload dir.
+        d = runs_mod.RUNS_ROOT / run_ts
+        if d.exists() and not any(d.iterdir()):
+            d.rmdir()
+        raise HTTPException(status_code=400, detail="Provide at least one input file.")
+    run_id = runs_mod.start_triage(
+        input_paths=input_paths,
+        provider=provider,
+        model=model,
+        reasoning_effort=reasoning,
+        local_only=local_only,
+        remediate=remediate,
+        use_rag=use_rag,
+        kb_path=kb_path,
+        prompt_strategy=prompt_strategy,
+        asset_registry=asset,
+        save_intermediates=save_intermediates,
+    )
+    return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+
+
+@app.get("/runs/{run_id}", response_class=HTMLResponse)
+def run_detail(request: Request, run_id: str) -> HTMLResponse:
+    record = runs_mod.registry.get(run_id) or runs_mod.record_from_disk(run_id, "triage")
+    if not record.run_dir.exists():
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return _render(request, "run_detail.html", record=record)
+
+
+@app.get("/runs/{run_id}/status")
+def run_status(run_id: str) -> JSONResponse:
+    record = _live_or_disk(run_id, "triage")
+    return JSONResponse(record.to_status())
+
+
+@app.get("/runs/{run_id}/report.html", response_class=HTMLResponse)
+def run_report_html(run_id: str) -> HTMLResponse:
+    record = _live_or_disk(run_id, "triage")
+    path = record.run_dir / "report.html"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Report not yet generated.")
+    return HTMLResponse(path.read_text())
+
+
+@app.get("/runs/{run_id}/report.pdf")
+def run_report_pdf(run_id: str) -> FileResponse:
+    """Download the PDF report (browser Save dialog)."""
+    record = _live_or_disk(run_id, "triage")
+    path = record.run_dir / "report.pdf"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="PDF report not yet generated.")
+    return FileResponse(
+        str(path),
+        media_type="application/pdf",
+        filename=f"vulntriage-{run_id}.pdf",
+    )
+
+
+@app.get("/runs/{run_id}/download")
+def run_download(run_id: str) -> Any:
+    """Zip the intermediates dir for download."""
+    import io
+    import zipfile
+
+    record = _live_or_disk(run_id, "triage")
+    inter = record.run_dir / "intermediates"
+    if not inter.exists():
+        raise HTTPException(status_code=404, detail="No intermediates for this run.")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in inter.iterdir():
+            if p.is_file():
+                zf.write(p, arcname=p.name)
+    buf.seek(0)
+    return FileResponse(
+        buf,
+        media_type="application/zip",
+        filename=f"vulntriage-{run_id}-intermediates.zip",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Eval runs
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/eval", response_class=HTMLResponse)
+def eval_list(request: Request) -> HTMLResponse:
+    live = [r for r in runs_mod.registry.all_runs() if r.kind == "eval"]
+    seen = {r.run_id for r in live}
+    on_disk = [runs_mod.record_from_disk(d.name, "eval") for d in runs_mod.list_eval_dirs()]
+    on_disk = [r for r in on_disk if r.run_id not in seen]
+    return _render(request, "eval_list.html", runs=live + on_disk)
+
+
+@app.get("/eval/new", response_class=HTMLResponse)
+def eval_new_form(request: Request) -> HTMLResponse:
+    return _render(
+        request,
+        "eval_new.html",
+        providers=_providers_for_view(local_only=False),
+        local_providers=sorted(LOCAL_PROVIDERS),
+        sample_available=SAMPLE_INPUT.exists(),
+    )
+
+
+@app.post("/eval/new")
+def eval_new_submit(
+    input_path: str = Form(...),
+    provider: str = Form(...),
+    model: str = Form(...),
+    repeats: int = Form(3),
+    local_only: bool = Form(False),
+) -> RedirectResponse:
+    _validate_provider(provider, local_only)
+    if not Path(input_path).exists():
+        raise HTTPException(status_code=400, detail=f"Input dataset not found: {input_path}")
+    run_id = runs_mod.start_eval(
+        input_path=input_path,
+        provider=provider,
+        model=model,
+        repeats=repeats,
+        local_only=local_only,
+    )
+    return RedirectResponse(url=f"/eval/{run_id}", status_code=303)
+
+
+@app.get("/eval/{run_id}", response_class=HTMLResponse)
+def eval_detail(request: Request, run_id: str) -> HTMLResponse:
+    record = runs_mod.registry.get(run_id) or runs_mod.record_from_disk(run_id, "eval")
+    if not record.run_dir.exists():
+        raise HTTPException(status_code=404, detail="Eval run not found.")
+    metrics: dict[str, Any] = {}
+    if record.metrics_path and record.metrics_path.exists():
+        metrics = json.loads(record.metrics_path.read_text())
+    return _render(request, "eval_detail.html", record=record, metrics=metrics)
+
+
+@app.get("/eval/{run_id}/metrics")
+def eval_metrics(run_id: str) -> FileResponse:
+    record = runs_mod.registry.get(run_id) or runs_mod.record_from_disk(run_id, "eval")
+    p = record.run_dir / "metrics.json"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="metrics.json not yet generated.")
+    return FileResponse(str(p), media_type="application/json", filename=p.name)
+
+
+# --------------------------------------------------------------------------- #
+# helpers
+# --------------------------------------------------------------------------- #
+
+
+def _validate_provider(provider: str, local_only: bool) -> None:
+    if provider not in PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+    if local_only and not is_local_provider(provider):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"--local-only is set but cloud provider requested: {provider}. "
+                f"Allowed: {', '.join(sorted(LOCAL_PROVIDERS))}."
+            ),
+        )
+
+
+def _live_or_disk(run_id: str, kind: str) -> runs_mod.RunRecord:
+    rec = runs_mod.registry.get(run_id)
+    if rec is None:
+        rec = runs_mod.record_from_disk(run_id, kind)
+    return rec
+
+
+def run() -> int:
+    """Entry point for the ``vulntriage-web`` script."""
+    import uvicorn
+
+    uvicorn.run("vulntriage.webapp.app:app", host="127.0.0.1", port=8000, log_level="info")
+    return 0

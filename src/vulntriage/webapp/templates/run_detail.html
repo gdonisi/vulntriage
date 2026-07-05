@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ record.run_id }} · vulntriage{% endblock %}
+{% block tab_runs %}active{% endblock %}
+
+{% block content %}
+<div style="position:relative;">
+  <div class="stamp-wrap" title="Run status">
+    <span class="stamp" data-run-state="{{ record.state }}" data-state="{{ record.state }}">
+      <span class="stamp-label">{{ stamp_word(record.state) }}</span>
+    </span>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <div class="eyebrow">Case file · triage</div>
+      <h1>{{ record.run_id }}</h1>
+    </div>
+    <div class="sub">started {{ record.started_at }}</div>
+  </div>
+
+  <div class="form-grid">
+    <div class="field">
+      <div class="field-label">Run ID</div>
+      <div class="field-value">{{ record.run_id }}</div>
+    </div>
+    <div class="field">
+      <div class="field-label">State</div>
+      <div class="field-value">{{ record.state }}</div>
+    </div>
+    <div class="field">
+      <div class="field-label">Provider / Model</div>
+      <div class="field-value">
+        {{ record.params.get("provider", "—") }} / {{ record.params.get("model", "—") }}
+        {% if record.params.get("reasoning_effort") %} · effort {{ record.params.reasoning_effort }}{% endif %}
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-label">Prompt strategy</div>
+      <div class="field-value">{{ record.params.get("prompt_strategy", "—") }}</div>
+    </div>
+    <div class="field">
+      <div class="field-label">Inputs</div>
+      <div class="field-value">
+        {% if record.params.get("scan_target") %}nuclei scan → {{ record.params.scan_target }}{% endif %}
+        {% if record.params.get("input_paths") %}
+          {{ record.params.input_paths|length }} file(s):
+          {% for p in record.params.input_paths %}{{ p|basename }}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% endif %}
+        {% if not record.params.get("scan_target") and not record.params.get("input_paths") %}—{% endif %}
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-label">Remediation / RAG</div>
+      <div class="field-value">
+        {% if record.params.get("remediate") %}on · RAG {% if record.params.get("use_rag") %}on{% else %}off{% endif %}
+        {% else %}off{% endif %}
+      </div>
+    </div>
+    {% if record.counts %}
+    <div class="field">
+      <div class="field-label">Findings</div>
+      <div class="field-value">
+        <div class="counts">
+          <span class="c"><b>{{ record.counts.total }}</b> total</span>
+          <span class="c sev high"><b>{{ record.counts.high }}</b>High</span>
+          <span class="c sev medium"><b>{{ record.counts.medium }}</b>Medium</span>
+          <span class="c sev low"><b>{{ record.counts.low }}</b>Low</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if record.state in ("pending", "running") %}
+  <div class="log-slip">
+    <div class="log-head">
+      <span>Progress log</span><span id="log-state">{{ record.state }}</span>
+    </div>
+    <div class="log-body" data-run-id="{{ record.run_id }}" data-kind="{{ record.kind }}">
+      {% for line in record.progress[-40:] %}<span class="line">{{ line }}</span><br>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if record.error %}
+  <div class="log-slip" style="border-color:var(--oxblood);">
+    <div class="log-head" style="color:var(--oxblood);"><span>Error</span></div>
+    <div class="log-body"><span class="line error">{{ record.error }}</span></div>
+  </div>
+  {% endif %}
+
+  {% if record.state in ("done",) %}
+  <div class="report-actions">
+    <div class="eyebrow">Report</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      {% if record.run_dir.exists() and (record.run_dir / "report.html").exists() %}
+      <a class="btn" href="/runs/{{ record.run_id }}/report.pdf" download>Download PDF</a>
+      {% endif %}
+      <a class="btn ghost" href="/runs/{{ record.run_id }}/report.html" target="_blank">Open HTML ↗</a>
+      {% if record.run_dir.exists() and (record.run_dir / "intermediates").exists() %}
+      <a class="btn ghost" href="/runs/{{ record.run_id }}/download">Intermediates (zip)</a>
+      {% endif %}
+    </div>
+  </div>
+  {% if record.run_dir.exists() and (record.run_dir / "report.html").exists() %}
+  <iframe class="report-frame" src="/runs/{{ record.run_id }}/report.html"
+          title="Triage report for {{ record.run_id }}"></iframe>
+  {% else %}
+  <p class="empty" style="padding:32px;">No report was generated for this run.</p>
+  {% endif %}
+  {% elif record.state == "interrupted" %}
+  <p class="empty" style="padding:32px;">
+    This run was halted before it finished.
+    <span class="sub" style="display:block;margin-top:8px;">Start a new run, or inspect the run folder on disk.</span>
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

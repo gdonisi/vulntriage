@@ -1,0 +1,365 @@
+/* vulntriage webapp — "Case File" design system.
+   A run is a physical case file in an analyst's archive: paper-buff folder,
+   pre-printed form boxes, hairline rules, a stamped status mark. Boldness is
+   spent on the stamp, not spread around. */
+
+:root {
+  --paper: #efeadf;
+  --paper-2: #e6e0d2;
+  --ink: #1f1e1b;
+  --ink-soft: #4a4843;
+  --oxblood: #7a2f26;
+  --ochre: #9a6b1a;
+  --sage: #5c6e4b;
+  --hairline: #c5bead;
+  --hairline-2: #d8d1c0;
+  --paper-shadow: rgba(31, 30, 27, 0.06);
+
+  --serif: "Spectral", "Source Serif Pro", Georgia, serif;
+  --sans: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--oxblood); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+
+/* --- Folder-tab navigation ---------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  max-width: 980px;
+  margin: 28px auto 0;
+  padding: 0 16px;
+}
+.tab {
+  font-family: var(--sans);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 10px 18px 9px;
+  color: var(--ink-soft);
+  background: var(--paper-2);
+  border: 1px solid var(--hairline);
+  border-bottom: none;
+  border-radius: 4px 12px 0 0;
+  position: relative;
+  top: 1px;
+  cursor: pointer;
+}
+.tab:hover { text-decoration: none; color: var(--ink); }
+.tab.active {
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 600;
+  border-color: var(--hairline);
+  z-index: 2;
+  padding-bottom: 10px;
+}
+
+/* --- Page container (the folder itself) --------------------------------- */
+
+.page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 40px 64px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-top: none;
+  min-height: 70vh;
+  box-shadow: 0 1px 0 var(--paper-shadow);
+  position: relative;
+}
+
+.page-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--hairline);
+  padding-bottom: 14px;
+  margin-bottom: 20px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.page-head h1 { font-size: 28px; }
+.page-head .sub { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); letter-spacing: 0.02em; }
+
+.eyebrow {
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+
+/* --- Pre-printed form fields -------------------------------------------- */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  margin-top: 16px;
+}
+.field {
+  border-right: 1px solid var(--hairline-2);
+  border-bottom: 1px solid var(--hairline-2);
+  padding: 10px 14px;
+  min-height: 52px;
+}
+.field:nth-child(2n) { border-right: none; }
+.field-label {
+  font-family: var(--sans);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: 3px;
+}
+.field-value {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  word-break: break-all;
+}
+.field-value.serif { font-family: var(--serif); font-size: 15px; }
+
+/* --- Rubber stamp (the signature element) ------------------------------ */
+
+.stamp-wrap { position: absolute; top: 14px; right: 28px; pointer-events: none; }
+.stamp {
+  display: inline-block;
+  border: 3px solid var(--oxblood);
+  color: var(--oxblood);
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.12em;
+  padding: 7px 16px 5px;
+  text-transform: uppercase;
+  transform: rotate(-6deg);
+  opacity: 0.92;
+  /* slightly distressed edges */
+  filter: url(#stamp-distress);
+  border-radius: 2px;
+  background: rgba(239, 234, 223, 0.55);
+  line-height: 1;
+}
+.stamp.small { font-size: 12px; padding: 5px 10px 3px; border-width: 2px; }
+.stamp[data-state="done"] { animation: stamp-land 220ms ease-out; }
+.stamp[data-state="running"] { border-style: dashed; opacity: 0.7; }
+.stamp[data-state="failed"] { border-color: var(--oxblood); background: rgba(122, 47, 38, 0.06); }
+.stamp[data-state="interrupted"] { color: var(--ink-soft); border-color: var(--ink-soft); opacity: 0.55; }
+@keyframes stamp-land {
+  0% { transform: rotate(-12deg) scale(1.4); opacity: 0; }
+  60% { transform: rotate(-4deg) scale(0.96); opacity: 1; }
+  100% { transform: rotate(-6deg) scale(1); opacity: 0.92; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stamp[data-state="done"] { animation: none; }
+}
+
+/* --- Log slip (progress) ----------------------------------------------- */
+
+.log-slip {
+  border: 1px solid var(--hairline);
+  background: #f6f2e8;
+  margin-top: 20px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.log-slip .log-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--hairline-2);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.log-body {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log-body .line { margin: 0; padding: 1px 0; }
+.log-body .line.error { color: var(--oxblood); }
+
+/* --- Buttons ----------------------------------------------------------- */
+
+.btn {
+  display: inline-block;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 8px 16px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 2px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover { background: var(--oxblood); border-color: var(--oxblood); text-decoration: none; color: var(--paper); }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--hairline); }
+.btn.ghost:hover { background: var(--paper-2); border-color: var(--ink); color: var(--ink); }
+.btn.oxblood { background: var(--oxblood); border-color: var(--oxblood); color: var(--paper); }
+
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+
+/* --- Forms ------------------------------------------------------------- */
+
+form.intake { max-width: 640px; margin-top: 12px; }
+.intake .row { margin-bottom: 16px; }
+.intake label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: 5px;
+}
+.intake label .req { color: var(--oxblood); }
+
+.intake input[type="text"],
+.intake input[type="number"],
+.intake select,
+.intake input[type="file"] {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  border-radius: 2px;
+  color: var(--ink);
+}
+.intake input:focus, .intake select:focus {
+  outline: none;
+  border-color: var(--oxblood);
+  box-shadow: 0 0 0 2px rgba(122, 47, 38, 0.18);
+}
+.intake .check { display: flex; align-items: center; gap: 8px; }
+.intake .check input { width: auto; }
+.intake .check label { margin: 0; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--ink); }
+.intake .hint { font-size: 11px; color: var(--ink-soft); margin-top: 4px; font-family: var(--sans); }
+.intake hr { border: none; border-top: 1px solid var(--hairline); margin: 22px 0; }
+
+.mode-tabs { display: flex; gap: 0; margin-bottom: 16px; border: 1px solid var(--hairline); }
+.mode-tabs label { flex: 1; text-align: center; padding: 8px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); cursor: pointer; border-right: 1px solid var(--hairline-2); margin: 0; background: var(--paper-2); }
+.mode-tabs label:last-child { border-right: none; }
+.mode-tabs input { display: none; }
+.mode-tabs input:checked + label { background: var(--paper); color: var(--oxblood); font-weight: 600; }
+
+/* --- Run list ---------------------------------------------------------- */
+
+.run-list { margin-top: 18px; }
+.run-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--hairline-2);
+}
+.run-row:hover { background: var(--paper-2); }
+.run-row .id { font-family: var(--mono); font-size: 13px; }
+.run-row .meta { font-family: var(--sans); font-size: 12px; color: var(--ink-soft); }
+.run-row .pill {
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  color: var(--ink-soft);
+}
+.run-row .pill.done { color: var(--sage); border-color: var(--sage); }
+.run-row .pill.running { color: var(--ochre); border-color: var(--ochre); }
+.run-row .pill.failed { color: var(--oxblood); border-color: var(--oxblood); }
+.run-row .pill.interrupted { color: var(--ink-soft); border-color: var(--ink-soft); }
+
+.empty {
+  text-align: center;
+  padding: 56px 20px;
+  color: var(--ink-soft);
+  font-family: var(--serif);
+  font-size: 18px;
+}
+.empty .sub { font-family: var(--sans); font-size: 13px; margin-top: 8px; }
+.empty .btn { margin-top: 18px; font-family: var(--sans); font-size: 13px; }
+
+/* --- Report iframe ----------------------------------------------------- */
+
+.report-frame {
+  width: 100%;
+  height: 80vh;
+  border: 1px solid var(--hairline);
+  margin-top: 18px;
+  background: #fff;
+}
+.report-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; flex-wrap: wrap; gap: 12px; }
+
+/* --- Severity tokens (mirror the report template) ---------------------- */
+
+.sev { font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+.sev.high { color: var(--oxblood); }
+.sev.medium { color: var(--ochre); }
+.sev.low { color: var(--sage); }
+
+.counts { display: flex; gap: 22px; margin-top: 4px; }
+.counts .c { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+.counts .c b { font-size: 18px; font-family: var(--serif); margin-right: 4px; }
+
+/* --- Eval metrics table ------------------------------------------------ */
+
+.metrics-table { width: 100%; border-collapse: collapse; margin-top: 16px; font-family: var(--mono); font-size: 11.5px; }
+.metrics-table th, .metrics-table td { border: 1px solid var(--hairline-2); padding: 6px 8px; text-align: right; }
+.metrics-table th { background: var(--paper-2); font-family: var(--sans); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; text-align: right; }
+.metrics-table td:first-child, .metrics-table th:first-child { text-align: left; }
+
+/* --- Footer ------------------------------------------------------------ */
+
+.footer {
+  max-width: 980px;
+  margin: 24px auto 0;
+  padding: 10px 16px 28px;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--ink-soft);
+  letter-spacing: 0.04em;
+}
+.footer code { font-family: var(--mono); }
+
+/* --- Responsive -------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .field:nth-child(n) { border-right: none; }
+  .page { padding: 20px 18px 48px; }
+  .run-row { grid-template-columns: 1fr; gap: 4px; }
+  .stamp-wrap { top: 4px; right: 10px; }
+  .stamp { font-size: 13px; padding: 5px 10px 3px; }
+}

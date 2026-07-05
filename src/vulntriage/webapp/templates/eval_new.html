@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}New evaluation · vulntriage{% endblock %}
+{% block tab_eval %}active{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Evaluation experiment grid</div>
+    <h1>New evaluation</h1>
+  </div>
+</div>
+
+<p style="font-family:var(--serif);font-size:17px;max-width:640px;color:var(--ink-soft);">
+  Runs the pipeline under a controlled grid (1 model × 2 prompt strategies × 2 RAG
+  conditions × repeats) against a ground-truth dataset and writes
+  <code style="font-family:var(--mono);">metrics.json</code> + <code style="font-family:var(--mono);">results.csv</code>
+  to its own timestamped folder.
+</p>
+
+<form class="intake" action="/eval/new" method="post">
+  <div class="row">
+    <label>Ground-truth dataset <span class="req">*</span></label>
+    <input type="text" name="input_path" required value="data/synthetic_findings.json">
+    <div class="hint">A single dataset with <code>ground_truth</code> fields per finding.</div>
+  </div>
+
+  <div class="row">
+    <label>Provider <span class="req">*</span></label>
+    <select name="provider" required>
+      {% for p in providers %}<option value="{{ p.name }}">{{ p.name }}{% if p.local %} (local){% endif %}</option>{% endfor %}
+    </select>
+  </div>
+
+  <div class="row">
+    <label>Model <span class="req">*</span></label>
+    <input type="text" name="model" required placeholder="qwen3.5-4b">
+  </div>
+
+  <div class="row">
+    <label>Repeats per condition</label>
+    <input type="number" name="repeats" value="3" min="1" max="12">
+    <div class="hint">12 conditions × repeats = N runs. Each run hits the LLM on every finding.</div>
+  </div>
+
+  <div class="row">
+    <label>Block cloud providers</label>
+    <div class="check">
+      <input type="checkbox" id="local_only" name="local_only" value="1"
+             onchange="
+               var cb=this.checked;
+               document.querySelectorAll('select[name=provider] option').forEach(function(o){
+                 o.hidden = cb && !o.textContent.includes('(local)');
+               });
+               var pc=document.querySelector('select[name=provider]');
+               if (cb && pc.selectedOptions[0].hidden){ pc.selectedIndex=0; }
+             ">
+      <label for="local_only">Local only — restrict to {{ local_providers|join(', ') }}</label>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn oxblood" type="submit">Run the grid</button>
+    <a class="btn ghost" href="/eval">Cancel</a>
+  </div>
+</form>
+{% endblock %}

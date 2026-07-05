@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Evaluation runs · vulntriage{% endblock %}
+{% block tab_eval %}active{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Archive</div>
+    <h1>Evaluation runs</h1>
+  </div>
+  <a class="btn oxblood" href="/eval/new">New evaluation</a>
+</div>
+
+<div class="run-list">
+  {% if runs %}
+    {% for r in runs %}
+      <a class="run-row" href="/eval/{{ r.run_id }}" style="text-decoration:none;color:inherit;">
+        <div>
+          <div class="id">{{ r.run_id }}</div>
+          <div class="meta">
+            {% if r.params.get("provider") %}{{ r.params.provider }} · {{ r.params.model }}{% endif %}
+            · {{ r.params.get("repeats", "—") }} repeats
+          </div>
+        </div>
+        <div class="meta">{% if r.metrics_path and r.metrics_path.exists() %}metrics ready{% endif %}</div>
+        <span class="pill {{ r.state }}">{{ stamp_word(r.state) }}</span>
+      </a>
+    {% endfor %}
+  {% else %}
+    <div class="empty">
+      No evaluation runs yet.
+      <div class="sub">The grid writes here under <code>output/eval/&lt;timestamp&gt;/</code>.</div>
+      <a class="btn oxblood" href="/eval/new">Start an evaluation</a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

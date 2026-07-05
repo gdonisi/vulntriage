@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Intake form · vulntriage{% endblock %}
+{% block tab_new %}active{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Intake form</div>
+    <h1>New triage run</h1>
+  </div>
+</div>
+
+<form class="intake" action="/runs/new" method="post" enctype="multipart/form-data">
+
+  <div class="mode-tabs" role="group" aria-label="Input mode">
+    <input type="radio" id="mode-dataset" name="mode" value="dataset" checked
+           onchange="document.getElementById('scan-fields').style.display='none';document.getElementById('input-fields').style.display='';">
+    <label for="mode-dataset">Triage a scan output</label>
+    <input type="radio" id="mode-scan" name="mode" value="scan"
+           onchange="document.getElementById('input-fields').style.display='none';document.getElementById('scan-fields').style.display='';">
+    <label for="mode-scan">Run a Nuclei scan, then triage</label>
+  </div>
+
+  <div id="input-fields">
+    <div class="row">
+      <label>Scanner output files <span class="req">*</span></label>
+      <input type="file" name="files" multiple accept=".xml,.jsonl,.json">
+      <div class="hint">XML (Nmap), JSONL (Nuclei), or JSON (synthetic). One or more; findings are merged.</div>
+    </div>
+    {% if sample_available %}
+    <div class="row check">
+      <input type="checkbox" id="use_sample" name="use_sample" value="1">
+      <label for="use_sample">Use the bundled sample dataset (data/synthetic_findings.json) instead of a file</label>
+    </div>
+    {% endif %}
+  </div>
+
+  <div id="scan-fields" style="display:none;">
+    <div class="row">
+      <label>Scan target <span class="req">*</span></label>
+      <input type="text" name="scan_target" placeholder="192.168.1.5 or http://host:8080">
+      <div class="hint">Requires the dockerized Nuclei image (see README). The scan output is kept in the run folder.</div>
+    </div>
+  </div>
+
+  <hr>
+
+  <div class="row">
+    <label>Provider <span class="req">*</span></label>
+    <select name="provider" required>
+      {% for p in providers %}
+        <option value="{{ p.name }}" {% if not loop.first %}{% endif %}>{{ p.name }}{% if p.local %} (local){% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="row">
+    <label>Model <span class="req">*</span></label>
+    <input type="text" name="model" required placeholder="qwen3.5-4b">
+  </div>
+
+  <div class="row">
+    <label>Reasoning effort</label>
+    <select name="reasoning_effort">
+      <option value="">(none)</option>
+      <option value="low">low</option>
+      <option value="medium">medium</option>
+      <option value="high">high</option>
+    </select>
+    <div class="hint">Provider support varies. Omit for standard (non-reasoning) models.</div>
+  </div>
+
+  <div class="row">
+    <label>Prompt strategy</label>
+    <select name="prompt_strategy">
+      {% for s in prompt_strategies %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+    </select>
+  </div>
+
+  <div class="row">
+    <label>Asset registry (YAML)</label>
+    <input type="text" name="asset_registry" value="{{ asset_default }}">
+  </div>
+
+  <div class="row">
+    <label>RAG knowledge base</label>
+    <input type="text" name="kb_path" value="{{ kb_default }}">
+  </div>
+
+  <div class="row check">
+    <input type="checkbox" id="remediate" name="remediate" value="1">
+    <label for="remediate">Generate remediation (LLM) — enables RAG grounding</label>
+  </div>
+
+  <div class="row check">
+    <input type="checkbox" id="use_rag" name="use_rag" value="1" checked>
+    <label for="use_rag">Use RAG knowledge base (default; uncheck for ungrounded LLM remediation)</label>
+  </div>
+
+  <div class="row check">
+    <input type="checkbox" id="save_intermediates" name="save_intermediates" value="1">
+    <label for="save_intermediates">Save intermediates (enriched/scored/prioritized/remediated JSON)</label>
+  </div>
+
+  <div class="row">
+    <label>Block cloud providers</label>
+    <div class="check">
+      <input type="checkbox" id="local_only" name="local_only" value="1"
+             onchange="
+               var cb=this.checked;
+               document.querySelectorAll('select[name=provider] option').forEach(function(o){
+                 o.hidden = cb && !o.textContent.includes('(local)');
+               });
+               var pc=document.querySelector('select[name=provider]');
+               if (cb && pc.selectedOptions[0].hidden){ pc.selectedIndex=0; pc.dispatchEvent(new Event('change')); }
+             ">
+      <label for="local_only">Local only — restrict to {{ local_providers|join(', ') }}</label>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn oxblood" type="submit">File this run</button>
+    <a class="btn ghost" href="/runs">Cancel</a>
+  </div>
+</form>
+{% endblock %}

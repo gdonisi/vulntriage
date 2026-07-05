@@ -16,3 +16,5 @@ wheels/
 .coverage
 .pytest_cache/
 htmlcov/
+synthetic_findings_v2.json
+docs/papers.txt

@@ -35,18 +35,20 @@ Run the evaluation experiment grid (single model):
 Run the evaluation experiment grid from a config file (multiple models):
 
     uv run python main.py --evaluate --eval-config data/eval_config.json
+
+Start the local web interface (see docs/specs/webapp-design.md):
+
+    uv run uvicorn vulntriage.webapp.app:app --reload
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-from .enricher import enrich_all
 from .evaluation import (
     ExperimentConfig,
     ModelSpec,
@@ -55,12 +57,8 @@ from .evaluation import (
 )
 from .llm import LOCAL_PROVIDERS, is_local_provider, make_client
 from .parser import parse
-from .prioritizer import load_asset_registry, prioritize
-from .remediator import remediate_all
-from .report_composer import compose as compose_report
-from .reporter import render
+from .pipeline import run_pipeline
 from .scanner import run_nuclei
-from .scorer import score_all
 
 # Sentinel for ``--save-intermediates`` with no explicit path: intermediates
 # are written under ``<run_dir>/intermediates/``.
@@ -185,6 +183,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exploitability scorer prompting strategy (default: few-shot, the v1 behaviour)",
     )
     p.add_argument(
+        "--web",
+        action="store_true",
+        help="Start the local web interface (alias for: uv run uvicorn vulntriage.webapp.app:app)",
+    )
+    p.add_argument(
         "--repeats",
         type=int,
         default=3,
@@ -261,14 +264,31 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_web(args: argparse.Namespace) -> int:
+    """Start the uvicorn server for the webapp."""
+    import uvicorn
+
+    uvicorn.run(
+        "vulntriage.webapp.app:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=False,
+        log_level="info",
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.web:
+        return _run_web(args)
 
     if args.evaluate:
         return _run_evaluate(args)
 
     if not args.input and not args.scan:
-        print("One of --input or --scan is required (or use --evaluate)", file=sys.stderr)
+        print("One of --input or --scan is required (or use --evaluate / --web)", file=sys.stderr)
         return 2
 
     # --provider and --model are optional when scanning only.
@@ -306,7 +326,6 @@ def main(argv: list[str] | None = None) -> int:
         parsed = parse(ip)
         findings.extend(parsed)
         print(f"[pipeline] parsed {len(parsed)} findings from {ip}")
-    print(f"[pipeline] {len(findings)} finding(s) after merge")
     if not findings:
         print("[pipeline] no findings to process")
         return 0
@@ -318,104 +337,37 @@ def main(argv: list[str] | None = None) -> int:
         reasoning_effort=args.reasoning_effort,
     )
 
-    few_shot = args.prompt_strategy == "few-shot"
-
-    # 4. Enrich.
-    print("[pipeline] enriching findings...")
-    enriched = enrich_all(findings, client)
-
-    # 5. Score exploitability.
-    print(f"[pipeline] scoring exploitability (prompt strategy: {args.prompt_strategy})...")
-    scored = score_all(enriched, client, few_shot=few_shot)
-
-    # 6. Prioritize.
-    print("[pipeline] prioritizing...")
-    assets = load_asset_registry(args.asset_registry)
-    prioritized = prioritize(scored, assets)
-
-    # 7. Remediate (optional, v2).
-    remediated = None
-    if args.remediate:
-        rag_label = "on" if args.rag else "off"
-        print(f"[pipeline] generating remediation (RAG: {rag_label})...")
-        remediated = remediate_all(prioritized, client, kb_path=args.kb, use_rag=args.rag)
-
-    # Compute the run timestamp once so the report dir and the intermediates
-    # dir share the same run id.
+    # Compute the run id once so the report dir and the intermediates dir share it.
     ts = _timestamp()
+    if args.output and args.output_format in ("html", "pdf", "both"):
+        run_dir = Path(args.output)
+    elif args.output:
+        run_dir = Path(args.output).parent
+    else:
+        run_dir = Path("output/runs") / ts
 
-    # 8. Report.
-    _write_report(args, prioritized, remediated, ts)
-
-    # 9. Optional: save intermediates for evaluation.
-    inter_dir = _resolve_intermediates_dir(args, ts)
-    if inter_dir is not None:
-        inter_dir.mkdir(parents=True, exist_ok=True)
-        (inter_dir / "enriched.json").write_text(
-            json.dumps([f.model_dump() for f in enriched], indent=2)
-        )
-        (inter_dir / "scored.json").write_text(
-            json.dumps([f.model_dump() for f in scored], indent=2)
-        )
-        (inter_dir / "prioritized.json").write_text(
-            json.dumps([f.model_dump() for f in prioritized], indent=2)
-        )
-        if remediated:
-            (inter_dir / "remediated.json").write_text(
-                json.dumps([f.model_dump() for f in remediated], indent=2)
-            )
-        print(f"[pipeline] intermediates saved to {inter_dir}")
-
+    save_inter = args.save_intermediates is not None
+    # An explicit --save-intermediates <dir> writes there directly (preserving
+    # the v2 behaviour); with no value, run_pipeline defaults to <run_dir>/intermediates/.
+    explicit_inter = (
+        args.save_intermediates
+        if args.save_intermediates and args.save_intermediates != _DEFAULT_INTERMEDIATES
+        else None
+    )
+    result = run_pipeline(
+        findings,
+        client,
+        out_dir=run_dir,
+        output_format=args.output_format,
+        remediate=args.remediate,
+        use_rag=args.rag,
+        kb_path=args.kb,
+        prompt_strategy=args.prompt_strategy,
+        asset_registry=args.asset_registry,
+        save_intermediates_flag=save_inter,
+        intermediates_dir=explicit_inter,
+        text_output=args.output if args.output_format == "text" else None,
+    )
+    if result.text_report is not None:
+        print(result.text_report)
     return 0
-
-
-def _run_dir_for_report(args: argparse.Namespace, ts: str) -> Path:
-    """Output directory for HTML/PDF reports (timestamped by default)."""
-    if args.output:
-        return Path(args.output)
-    return Path("output/runs") / ts
-
-
-def _resolve_intermediates_dir(args: argparse.Namespace, ts: str) -> Path | None:
-    """Resolve the intermediates directory, or None when not requested."""
-    if args.save_intermediates is None:
-        return None
-    if args.save_intermediates != _DEFAULT_INTERMEDIATES:
-        return Path(args.save_intermediates)
-    # Default: alongside the report output (same run id).
-    if args.output_format in ("html", "pdf", "both"):
-        return _run_dir_for_report(args, ts) / "intermediates"
-    # text format: --output is a file (or stdout).
-    if args.output:
-        return Path(args.output).parent / "intermediates"
-    return Path("output/runs") / ts / "intermediates"
-
-
-def _write_report(args: argparse.Namespace, prioritized, remediated, ts: str) -> None:
-    """Render the report in the requested format."""
-    if args.output_format == "text":
-        report = render(prioritized)
-        if args.output:
-            Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.output).write_text(report)
-            print(f"[pipeline] report written to {args.output}")
-        else:
-            print(report)
-        return
-
-    # HTML / PDF / both accept remediated or plain prioritized findings.
-    findings = remediated if remediated is not None else prioritized
-    if remediated is None:
-        print(
-            "[pipeline] note: rendering HTML/PDF without --remediate; "
-            "remediation sections will be empty.",
-            file=sys.stderr,
-        )
-
-    out_dir = _run_dir_for_report(args, ts)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    html_path = out_dir / "report.html" if args.output_format in ("html", "both") else None
-    pdf_path = out_dir / "report.pdf" if args.output_format in ("pdf", "both") else None
-    written = compose_report(findings, html_path=html_path, pdf_path=pdf_path)
-    for fmt, path in written.items():
-        print(f"[pipeline] {fmt} report written to {path}")

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Runs · vulntriage{% endblock %}
+{% block tab_runs %}active{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Case files</div>
+    <h1>Triage runs</h1>
+  </div>
+  <a class="btn oxblood" href="/runs/new">New run</a>
+</div>
+
+<div class="run-list">
+  {% if runs %}
+    {% for r in runs %}
+      <a class="run-row" href="/runs/{{ r.run_id }}" style="text-decoration:none;color:inherit;">
+        <div>
+          <div class="id">{{ r.run_id }}</div>
+          <div class="meta">
+            {% if r.params.get("provider") %}{{ r.params.provider }} · {{ r.params.model }}{% endif %}
+            {% if r.params.get("scan_target") %} · scan {{ r.params.scan_target }}{% endif %}
+            {% if r.params.get("input_paths") %} · {{ r.params.input_paths|length }} input(s){% endif %}
+          </div>
+        </div>
+        <div class="meta">{% if r.counts %}{{ r.counts.get("total", 0) }} findings{% endif %}</div>
+        <span class="pill {{ r.state }}">{{ stamp_word(r.state) }}</span>
+      </a>
+    {% endfor %}
+  {% else %}
+    <div class="empty">
+      The archive is empty.
+      <div class="sub">Start a triage run and it will be filed here.</div>
+      <a class="btn oxblood" href="/runs/new">Start a triage run</a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

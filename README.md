@@ -75,6 +75,38 @@ are never overwritten:
 The `output/` tree is tracked in git; `.gitkeep` files keep the
 `output/runs/`, `output/reports/`, and `output/eval/` directories present.
 
+## Web interface
+
+A local browser UI presents each triage pass and evaluation grid as a "case
+file" — a stamped manifest, a live progress log while the LLM works, and the
+rendered report embedded with a **Download PDF** control.
+
+```bash
+uv run python main.py --web
+# or: uv run uvicorn vulntriage.webapp.app:app --reload
+```
+
+Open <http://127.0.0.1:8000>. From the dashboard you can:
+
+- **Start a triage run** — upload one or more scanner outputs (or use the
+  bundled sample dataset), pick a provider/model, toggle remediation/RAG, or
+  run a Nuclei scan against a target and continue straight into triage.
+- **Read the dossier** — the run's stamped status mark, a pre-printed manifest
+  (provider, model, inputs, finding counts), the live progress log while
+  running, and the embedded report once done.
+- **Download the PDF** — every web-driven run renders both `report.html`
+  (shown in the page) and `report.pdf` (the download button) to the run
+  directory, so the in-app artifact and the file on disk are identical.
+- **Run the evaluation grid** — `Evaluation › New` runs the 12-cell grid and
+  renders `metrics.json` as a per-condition table.
+
+The webapp reuses the exact same pipeline as the CLI (`vulntriage.pipeline`),
+the same run layout under `output/runs/<id>/` and `output/eval/<id>/`, and
+the same `--local-only` gate. Runs created from the CLI appear in the webapp
+and vice versa; a server restart recovers interrupted runs from disk.
+
+See `docs/specs/webapp-design.md` for the design.
+
 ## Evaluation harness
 
 Run the experiment grid (models × prompt strategies × RAG on/off) and write

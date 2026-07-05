@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Archive · vulntriage{% endblock %}
+{% block tab_home %}active{% endblock %}
+
+{% macro stamp_mini(state) -%}
+<span class="pill {{ state }}">{{ stamp_word(state) }}</span>
+{%- endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Archive</div>
+    <h1>Case files</h1>
+  </div>
+  <div class="sub">{{ triage_runs|length + eval_runs|length }} runs on disk</div>
+</div>
+
+<p style="font-family:var(--serif);font-size:17px;max-width:640px;color:var(--ink-soft);">
+  Every triage pass and evaluation grid lands here as its own folder — the
+  report, the run manifest, and any intermediates. Nothing is overwritten.
+</p>
+
+<div class="actions">
+  <a class="btn oxblood" href="/runs/new">Start a triage run</a>
+  <a class="btn ghost" href="/eval/new">Run the evaluation grid</a>
+</div>
+
+<h2 style="margin-top:36px;font-size:18px;">Recent triage runs</h2>
+<div class="run-list">
+  {% if triage_runs %}
+    {% for r in triage_runs[:8] %}
+      <a class="run-row" href="/runs/{{ r.run_id }}" style="text-decoration:none;color:inherit;">
+        <div>
+          <div class="id">{{ r.run_id }}</div>
+          <div class="meta">
+            {% if r.params.get("provider") %}{{ r.params.provider }} · {{ r.params.model }}{% endif %}
+            {% if r.params.get("scan_target") %} · scan {{ r.params.scan_target }}{% endif %}
+          </div>
+        </div>
+        <div class="meta">{% if r.counts %}{{ r.counts.get("total", "—") }} findings{% endif %}</div>
+        <span class="pill {{ r.state }}">{{ stamp_word(r.state) }}</span>
+      </a>
+    {% endfor %}
+  {% else %}
+    <div class="empty">
+      No runs yet.
+      <div class="sub">Start one and it will appear here as a case file.</div>
+    </div>
+  {% endif %}
+</div>
+
+{% if eval_runs %}
+<h2 style="margin-top:36px;font-size:18px;">Recent evaluation runs</h2>
+<div class="run-list">
+  {% for r in eval_runs[:5] %}
+    <a class="run-row" href="/eval/{{ r.run_id }}" style="text-decoration:none;color:inherit;">
+      <div>
+        <div class="id">{{ r.run_id }}</div>
+        <div class="meta">{% if r.params.get("provider") %}{{ r.params.provider }} · {{ r.params.model }}{% endif %}</div>
+      </div>
+      <div></div>
+      <span class="pill {{ r.state }}">{{ stamp_word(r.state) }}</span>
+    </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -304,6 +304,7 @@ Single entry point via `main.py`. Command-line flags:
 | `--rag` / `--no-rag` | v2 | Toggle RAG grounding |
 | `--kb` | v2 | Path to RAG knowledge base |
 | `--prompt-strategy` | v2 | few-shot (default) / zero-shot |
+| `--web` | v3 | Start the local web interface (alias for `uvicorn vulntriage.webapp.app:app`) |
 | `--evaluate` | v2 | Run the evaluation experiment grid |
 | `--eval-config` | v2 | JSON config file for multi-model grid |
 | `--repeats` | v2 | Repeats per condition in eval mode |
@@ -358,7 +359,7 @@ The `output/` tree is tracked in git; `.gitkeep` files keep
 
 ## 13. Tests
 
-50 tests across 6 test files:
+63 tests across 8 test files:
 
 | File | Tests | What it covers |
 |---|---|---|
@@ -368,9 +369,11 @@ The `output/` tree is tracked in git; `.gitkeep` files keep
 | `test_evaluation.py` | 16 | Ground truth mapping, metric computation, Spearman, CVSS-only baseline, manual time estimate, full experiment grid |
 | `test_pipeline_integration.py` | 2 | End-to-end pipeline (parse→enrich→score→prioritize→remediate→compose) with mock client, zero-shot+no-rag variant |
 | `test_cli.py` | 15 | Help text, text/HTML/PDF/both reports, HTML without `--remediate`, zero-shot+no-rag, save-intermediates (explicit + default path), multi-input merge, `--local-only` (triage + eval), timestamped run dirs, eval timestamped output, evaluate single-model, error handling |
+| `test_pipeline.py` | 6 | Extracted `run_pipeline()`: HTML+PDF render, text-to-stdout, default intermediates dir, explicit intermediates dir, remediation on/off |
+| `test_webapp.py` | 7 | Dashboard/forms render, new-run (sample + uploads) reaches `done`, stamp + Download PDF present, `--local-only` blocks cloud in the webapp, eval list |
 | `conftest.py` | — | `MockLLMClient` fixture (canned structured JSON responses) |
 
-All tests use mock LLM responses — no real model needed. Coverage: report_composer 100%, remediator 96%, evaluation 87%, cli 86%, models 100%, scorer 79%.
+All tests use mock LLM responses — no real model needed; the webapp tests patch `run_pipeline` so no model is required either.
 
 ---
 
@@ -422,7 +425,13 @@ project/
 │   ├── report_composer.py           # HTML + PDF reports (v2, new)
 │   ├── evaluation.py                # Experiment harness (v2, new)
 │   ├── json_utils.py                # Shared JSON parsing helpers (v2, new)
-│   └── cli.py                       # CLI orchestration (v1 + v2 flags)
+│   ├── pipeline.py                  # Extracted triage run logic (shared by CLI + webapp)
+│   ├── webapp/                      # FastAPI local web interface (v3, new)
+│   │   ├── app.py                   # Routes, run registry, run worker wiring
+│   │   ├── runs.py                  # In-memory RunRegistry + RunWorker + stdout capture
+│   │   ├── templates/               # Jinja2 pages (Case File design system)
+│   │   └── static/{style.css,app.js}#
+│   └── cli.py                       # CLI orchestration (v1 + v2 + --web flags)
 ├── tests/
 │   ├── conftest.py                  # MockLLMClient fixture
 │   ├── test_remediator.py
@@ -430,7 +439,9 @@ project/
 │   ├── test_scorer_fewshot.py
 │   ├── test_evaluation.py
 │   ├── test_pipeline_integration.py
-│   └── test_cli.py
+│   ├── test_cli.py
+│   ├── test_pipeline.py             # run_pipeline() unit tests
+│   └── test_webapp.py               # FastAPI TestClient webapp tests
 ├── docs/
 │   ├── specs/
 │   │   ├── triage-pipeline-design.md        # v1 design spec
@@ -468,11 +479,7 @@ implemented; the web frontend remains future work.
   `output/runs/<ts>/` and eval results to `output/eval/<ts>/` (timestamped);
   `--save-intermediates` (no value) defaults to `<run_dir>/intermediates/`.
 
-**Remaining future work:**
-
-- **Web frontend** — a small webapp exposing the pipeline (upload scan output,
-  trigger triage, view the HTML report) is planned (`frontend-design` skill);
-  the CLI and `compose_report` are already reusable as a library.
+**Remaining future work:** none tracked in `todo.txt` after this iteration.
 
 **Additional limitations relevant to the thesis evaluation:**
 
@@ -488,3 +495,65 @@ disk cache keyed by `(model, prompt)` would cut cost and improve
   reproducibility for re-runs.
 - **Temperature fixed at 0.2** — not configurable from the CLI; the v2 design
   flagged temp=0 for eval runs as a non-determinism mitigation.
+
+---
+
+## 17. Web Interface (`src/vulntriage/webapp/`)
+
+A local browser UI (`uv run python main.py --web`, or
+`uv run uvicorn vulntriage.webapp.app:app --reload`) presents each triage
+pass and evaluation grid as a **case file** in an analyst's archive. It is a
+thin viewer/controller over thesame filesystem run layout the CLI writes — no
+database, no separate run model.
+
+### 17.1 Routes
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/` | GET | Archive dashboard: recent triage + eval runs |
+| `/runs` | GET | Triage run list |
+| `/runs/new` | GET/POST | Intake form: upload files / use sample / scan a target; spawns a worker |
+| `/runs/<id>` | GET | Run dossier: stamped manifest + live progress + embedded report |
+| `/runs/<id>/status` | GET | JSON: state, progress tail, counts, artifact flags (polled by `app.js`) |
+| `/runs/<id>/report.html` | GET | The rendered HTML report (served from disk) |
+| `/runs/<id>/report.pdf` | GET | The PDF report, as a download (`application/pdf`) |
+| `/runs/<id>/download` | GET | Intermediates as a zip |
+| `/eval`, `/eval/new`, `/eval/<id>` | GET/POST | Evaluation grid launch + dossier + metrics table |
+
+### 17.2 Run model
+
+A run is a timestamped directory under `output/runs/` (triage) or
+`output/eval/` (eval). The webapp holds only in-flight runs in an in-memory
+`RunRegistry`; the filesystem stays the source of truth. On startup
+`recover_interrupted()` scans the run dirs and marks any lacking a final
+artifact (`report.html`/`report.pdf` for triage, `metrics.json` for eval) —
+and not live — as `interrupted`, so a server restart never hides a
+half-finished run.
+
+Each run executes in a `RunWorker` thread. The pipeline's existing `print()`
+lines are captured by a per-worker `sys.stdout` redirect into a ring buffer,
+which becomes the live progress feed — no instrumentation of the pipeline
+itself. The webapp calls the same `vulntriage.pipeline.run_pipeline` (and
+`vulntriage.evaluation.run_experiment`) the CLI uses, so behaviour is
+identical.
+
+### 17.3 PDF download
+
+Every web-driven triage run renders **both** `report.html` (shown in an
+`<iframe>` on the dossier) and `report.pdf` (the Download PDF button)
+regardless of the `--remediate` toggle, so the file offered for download is
+byte-identical to what `--output-format both` would produce from the CLI.
+
+### 17.4 Design — "Case File"
+
+The UI treats each run as a physical case file: a paper-buff folder with
+pre-printed form boxes and a rubber-stamp status mark. The signature element
+is the stamp (REVIEWED / IN REVIEW / FAILED / HALTED) — rotated –6° in
+oxblood with a distressed SVG-filter edge; the only animation is a 200 ms
+"landing" on transition to done (disabled under `prefers-reduced-motion`).
+
+Type: *Spectral* (display serif), *IBM Plex Sans* (body), *JetBrains Mono*
+(run IDs, host:port, CVSS). Palette: `paper #EFEADF`, `ink #1F1E1B`,
+`oxblood #7A2F26`, `ochre #9A6B1A`, `sage #5C6E4B`, `hairline #C5BEAD`.
+Everything else is disciplined: hairline rules, ~no radii, no shadows, no
+gradients; severity colour comes only from the data.
