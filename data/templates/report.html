@@ -26,6 +26,9 @@
     .badge.High { background: #c0392b; }
     .badge.Medium { background: #d68910; }
     .badge.Low { background: #1e8449; }
+    .badge.Unresolved { background: #555; }
+    .vote-box { font-size: 9pt; color: #555; margin: 4px 0; padding: 4px 8px; background: #f6f5f1; border-left: 3px solid #999; }
+    .vote-box b { color: #222; }
     .kv { font-size: 9.5pt; color: #444; margin: 2px 0; }
     .kv span { font-weight: 600; color: #222; }
     .context { margin: 8px 0; font-size: 10pt; }
@@ -48,6 +51,7 @@
     <div class="stat high"><div class="num">{{ summary.high }}</div><div class="lbl">High</div></div>
     <div class="stat med"><div class="num">{{ summary.medium }}</div><div class="lbl">Medium</div></div>
     <div class="stat low"><div class="num">{{ summary.low }}</div><div class="lbl">Low</div></div>
+    {% if summary.ensemble %}<div class="stat"><div class="num">{{ summary.unresolved }}</div><div class="lbl">Unresolved</div></div>{% endif %}
   </div>
 
   <h2>Risk Breakdown</h2>
@@ -62,13 +66,20 @@
   <h2>Technical Findings</h2>
   {% for f in findings %}
   <div class="finding">
-    <h3>#{{ f.rank }} <span class="badge {{ f.exploitability }}">{{ f.exploitability }}</span> {{ f.description }}</h3>
+    <h3>#{{ f.rank }} 
+      {% if f.ensemble_unresolved %}<span class="badge Unresolved">Unresolved</span>
+      {% else %}<span class="badge {{ f.exploitability_class }}">{{ f.exploitability }}</span>{% endif %}
+      {{ f.description }}
+    </h3>
     <div class="kv"><span>Host:</span> {{ f.host }}{% if f.port %}:{{ f.port }}{% endif %}</div>
     {% if f.cve %}<div class="kv"><span>CVE:</span> {{ f.cve }}</div>{% endif %}
     {% if f.cvss is not none %}<div class="kv"><span>CVSS:</span> {{ f.cvss }}</div>{% endif %}
     <div class="kv"><span>Risk score:</span> {{ f.risk_score }} <span>(asset criticality {{ f.asset_criticality }})</span></div>
     <div class="context"><span>Context:</span> {{ f.context }}</div>
     <div class="context"><span>Exploitability rationale:</span> {{ f.exploitability_rationale }}</div>
+    {% if f.exploitability_votes %}
+    <div class="vote-box"><b>Ensemble votes:</b> {% for m, lbl in f.exploitability_votes.items() %}{{ m }}={{ lbl }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+    {% endif %}
     {% if f.remediation_steps %}
     <div class="kv"><span>Remediation:</span> {{ f.remediation_rationale }}</div>
     <ol class="steps">
@@ -87,7 +98,7 @@
       <tr>
         <td>{{ f.rank }}</td>
         <td>{{ f.risk_score }}</td>
-        <td>{{ f.exploitability }}</td>
+        <td>{% if f.ensemble_unresolved %}Unresolved{% else %}{{ f.exploitability }}{% endif %}</td>
         <td>{{ f.description }}</td>
         <td>{{ f.host }}</td>
       </tr>

@@ -90,6 +90,11 @@ def run_pipeline(
     save_intermediates_flag: bool = False,
     intermediates_dir: str | Path | None = None,
     text_output: str | Path | None = None,
+    # Ensemble: fan out only the exploitability scorer across these clients.
+    # ``client`` remains the primary (used for enrichment + remediation and as
+    # the first ensemble member). See ``scorer.score_all`` for the merge rule.
+    scoring_clients: list[LLMClient] | None = None,
+    scoring_quorum: int | None = None,
 ) -> RunResult:
     """Run a single triage pass on *findings* and write artifacts to *out_dir*.
 
@@ -108,9 +113,24 @@ def run_pipeline(
     print("[pipeline] enriching findings...")
     enriched = enrich_all(findings, client)
 
-    # 2. Score exploitability.
-    print(f"[pipeline] scoring exploitability (prompt strategy: {prompt_strategy})...")
-    scored = score_all(enriched, client, few_shot=few_shot)
+    # 2. Score exploitability. If a scoring ensemble is supplied, only this
+    # step fans out (multiple models); enrichment/remediation stay single-model.
+    if scoring_clients:
+        print(
+            f"[pipeline] scoring exploitability (ensemble of {len(scoring_clients)} "
+            f"model(s), quorum={scoring_quorum or (len(scoring_clients) // 2 + 1)}, "
+            f"prompt strategy: {prompt_strategy})..."
+        )
+        scored = score_all(
+            enriched,
+            client,
+            few_shot=few_shot,
+            clients=scoring_clients,
+            quorum=scoring_quorum,
+        )
+    else:
+        print(f"[pipeline] scoring exploitability (prompt strategy: {prompt_strategy})...")
+        scored = score_all(enriched, client, few_shot=few_shot)
 
     # 3. Prioritize.
     print("[pipeline] prioritizing...")

@@ -27,7 +27,8 @@ def render(findings: list[PrioritizedFinding]) -> str:
 
     for f in findings:
         lines.append("-" * BAR_LENGTH)
-        lines.append(f"#{f.rank} [{f.exploitability.value}] {f.description}")
+        flag = " [UNRESOLVED]" if getattr(f, "ensemble_unresolved", False) else ""
+        lines.append(f"#{f.rank} [{f.exploitability.value}]{flag} {f.description}")
         lines.append(f"  Host: {f.host}" + (f"  Port: {f.port}" if f.port else ""))
         if f.cve:
             lines.append(f"  CVE: {f.cve}")
@@ -36,14 +37,21 @@ def render(findings: list[PrioritizedFinding]) -> str:
         lines.append(f"  Risk Score: {f.risk_score} (asset criticality: {f.asset_criticality})")
         lines.append(f"  Context: {f.context}")
         lines.append(f"  Exploitability rationale: {f.exploitability_rationale}")
+        votes = getattr(f, "exploitability_votes", {})
+        if votes:
+            vote_str = ", ".join(f"{m}={lbl}" for m, lbl in sorted(votes.items()))
+            lines.append(f"  Votes: {vote_str}")
         lines.append("")
 
     lines.append("-" * BAR_LENGTH)
     lines.append("RANKED SUMMARY")
     lines.append("-" * BAR_LENGTH)
-    lines.append(f"{'Rank':<5} {'Score':<7} {'Exploit':<8} {'Finding'}")
+    lines.append(f"{'Rank':<5} {'Score':<7} {'Exploit':<11} {'Finding'}")
     for f in findings:
-        lines.append(f"{f.rank:<5} {f.risk_score:<7} {f.exploitability.value:<8} {f.description}")
+        tag = f.exploitability.value
+        if getattr(f, "ensemble_unresolved", False):
+            tag = "UNRESOLVED"
+        lines.append(f"{f.rank:<5} {f.risk_score:<7} {tag:<11} {f.description}")
     lines.append("=" * BAR_LENGTH)
     lines.append("\n")
     return "\n".join(lines)

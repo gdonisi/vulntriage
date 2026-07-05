@@ -25,37 +25,33 @@
   </div>
 
   <div class="row">
+    <label>Block cloud providers</label>
+    <div class="check">
+      <input type="checkbox" id="local_only" name="local_only" value="1"
+             onchange="VulnTriage.onLocalOnlyToggle(this.checked)">
+      <label for="local_only">Local only — restrict to {{ local_providers|join(', ') }}</label>
+    </div>
+  </div>
+
+  <div class="row">
     <label>Provider <span class="req">*</span></label>
-    <select name="provider" required>
-      {% for p in providers %}<option value="{{ p.name }}">{{ p.name }}{% if p.local %} (local){% endif %}</option>{% endfor %}
+    <select name="provider" required onchange="VulnTriage.refreshModels(this)">
+      {% for p in providers %}<option value="{{ p.name }}" data-local="{{ '1' if p.local else '' }}">{{ p.name }}{% if p.local %} (local){% endif %}</option>{% endfor %}
     </select>
   </div>
 
   <div class="row">
     <label>Model <span class="req">*</span></label>
-    <input type="text" name="model" required placeholder="qwen3.5-4b">
+    <input type="text" name="model" required placeholder="qwen3.5-4b"
+           list="models-dl" autocomplete="off">
+    <div class="hint">Suggestions come from the provider's <code>/models</code> endpoint; you can always type a custom name.</div>
   </div>
+  <datalist id="models-dl"></datalist>
 
   <div class="row">
     <label>Repeats per condition</label>
     <input type="number" name="repeats" value="3" min="1" max="12">
     <div class="hint">12 conditions × repeats = N runs. Each run hits the LLM on every finding.</div>
-  </div>
-
-  <div class="row">
-    <label>Block cloud providers</label>
-    <div class="check">
-      <input type="checkbox" id="local_only" name="local_only" value="1"
-             onchange="
-               var cb=this.checked;
-               document.querySelectorAll('select[name=provider] option').forEach(function(o){
-                 o.hidden = cb && !o.textContent.includes('(local)');
-               });
-               var pc=document.querySelector('select[name=provider]');
-               if (cb && pc.selectedOptions[0].hidden){ pc.selectedIndex=0; }
-             ">
-      <label for="local_only">Local only — restrict to {{ local_providers|join(', ') }}</label>
-    </div>
   </div>
 
   <div class="actions">

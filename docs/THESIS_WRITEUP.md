@@ -45,13 +45,18 @@ Six Pydantic models form a strict inheritance chain, each adding fields:
 |---|---|---|---|
 | `RawFinding` | — | `id`, `source`, `host`, `port`, `service`, `description`, `cvss`, `cve` | Parser output |
 | `EnrichedFinding` | `RawFinding` | `context` (threat analysis), `enrichment_model` | Enricher output |
-| `ScoredFinding` | `EnrichedFinding` | `exploitability` (High/Medium/Low enum), `exploitability_rationale`, `scoring_model` | Scorer output |
+| `ScoredFinding` | `EnrichedFinding` | `exploitability` (High/Medium/Low enum), `exploitability_rationale`, `scoring_model`; plus three optional ensemble fields — `exploitability_votes` (dict[str,str]), `ensemble_quorum` (int\|None), `ensemble_unresolved` (bool) — empty/None/False for single-model runs | Scorer output |
 | `PrioritizedFinding` | `ScoredFinding` | `asset_criticality` (float), `risk_score`, `rank` | Prioritizer output |
 | `RemediatedFinding` | `PrioritizedFinding` | `remediation_steps` (list[str]), `remediation_rationale`, `rag_hits`, `remediation_model` | Remediator output |
 
 `Exploitability` is a `StrEnum` with values `HIGH`, `MEDIUM`, `LOW` and a
 `.numeric()` method returning 1.0, 0.5, 0.1 respectively — used by the
-prioritizer formula.
+prioritizer formula. Note that `Unresolved` is **not** an `Exploitability` enum
+member: in ensemble mode an unresolved finding keeps a High/Medium/Low
+`exploitability` (the highest tally label, so the deterministic prioritizer
+still ranks it) and is flagged via the separate `ensemble_unresolved` boolean;
+this leaves `Exploitability.numeric()` and the CVSS-E accuracy metric (scoped
+to High/Medium/Low) untouched.
 
 ---
 
@@ -80,6 +85,20 @@ providers, `False` for cloud). It is not part of the request path; the CLI
 `--local-only` flag uses the same `LOCAL_PROVIDERS` set
 (`lmstudio`/`ollama`/`llamacpp`/`vllm`) to refuse cloud providers before any
 network call is made.
+
+**Provider configuration** is centralized in `_provider_config(provider)`
+returning `(base_url, api_key, local)`; both `make_client` (chat completions)
+and `list_models` (model enumeration) route through it so they never disagree
+about the base URL or auth.
+
+**Model enumeration** (`list_models(provider) -> list[str]`) queries each
+provider's OpenAI-compatible `GET /models` endpoint
+(`client.models.list()`), parsing `data[].id` defensively (with `body.model`
+/ `model` fallbacks). It is strictly best-effort: on any error (endpoint
+missing, auth, transport) it returns `[]` so callers — the webapp model
+picker — can fall back to free-text input. The webapp exposes it at
+`GET /models?provider=...` returning `{"models": [...], "error": null|str}`;
+a cloud key is never exposed to the browser, the call is server-side.
 
 ---
 
@@ -123,6 +142,41 @@ Returns JSON with `"exploitability"` (High/Medium/Low) and `"rationale"`. A
 `_coerce_label()` function handles fuzzy LLM output (e.g. "high" → `HIGH`).
 Fallback for unparseable responses: if CVSS >= 7.0, default to Medium; else
 Low.
+
+### 6.1 Multi-LLM ensemble (scoring only)
+
+`score_all` accepts two optional parameters — `clients: list[LLMClient] |
+None` and `quorum: int | None` — that fan out only the exploitability scorer
+across N models. Enrichment, prioritization, remediation, and report
+composition still run once on the primary client; the primary
+(`--provider`/`--model`) is the **first** ensemble member and is used for
+enrichment + remediation. The single-model path (`clients is None`) is
+byte-identical to v1 and (with `clients set`) the merge runs:
+
+1. Each finding is scored once per client, collecting `{client.model: label}`
+   into `exploitability_votes`.
+2. A strict-majority quorum is applied: if `quorum is None` it defaults to
+   `⌊N/2⌋ + 1` (a genuine majority — for even N this requires unanimity, for
+   odd N a bare majority).
+3. If any label's tally ≥ quorum, that label is the final `exploitability` and
+   `ensemble_unresolved = False`.
+4. Else `ensemble_unresolved = True`; `exploitability` is set to the highest
+   tally label (so the deterministic prioritizer still ranks it somewhere
+   sane) while the report renders it as **Unresolved**.
+5. `exploitability_rationale` is a fully transparent tally+quorum summary,
+   e.g. `"2/3 models: High=2, Medium=1 (quorum 2 -> High)"` (or
+   `"0/3 models: High=1, Medium=1, Low=1 (quorum 2 -> unresolved -> fallback High)`
+   when no label reaches quorum).
+
+**Why scoring-only, and why strict-majority** are recorded in
+`docs/specs/ensemble-and-model-picker-design.md`. In short: the exploitability
+label is the one categorical triage decision where false positives concretely
+bite, so merging is a clean auditable vote; and strict majority (not
+plain-majority-with-tiebreak) guarantees that a lone High from one model
+**never** silently becomes a final High — disagreements are surfaced as
+`Unresolved` to the human instead of being handed a confident guess.
+Unresolved findings are excluded from the High/Medium/Low accuracy metric
+(no ground-truth match) but retained for ranking and latency.
 
 ---
 
@@ -205,6 +259,15 @@ accepts `RemediatedFinding` (full report with `--remediate`) **or** plain
 `PrioritizedFinding` (HTML/PDF rendered without `--remediate`); in the latter
 case remediation fields are read via `getattr` defaults and the remediation
 sections render empty, so `--output-format html/pdf/both` works on its own.
+
+**Ensemble rendering** (v3): when a finding carries `exploitability_votes`,
+the card renders a vote-breakdown box and, if `ensemble_unresolved`, an
+`Unresolved` badge (distinct grey, separate from the High/Med/Low colours).
+The High/Medium/Low counts in the summary exclude unresolved findings, which
+instead get their own `Unresolved` tile; the executive summary appends a
+sentence naming the ensemble size, quorum, and Unresolved count. The plain-text
+reporter (`reporter.py`) prints `[UNRESOLVED]` for unresolved rows in the rank
+table and a per-model `Votes:` line per finding when votes exist.
 
 ---
 
@@ -304,6 +367,8 @@ Single entry point via `main.py`. Command-line flags:
 | `--rag` / `--no-rag` | v2 | Toggle RAG grounding |
 | `--kb` | v2 | Path to RAG knowledge base |
 | `--prompt-strategy` | v2 | few-shot (default) / zero-shot |
+| `--ensemble` | v3 | Comma-separated extra scoring models (`provider:model`, split on first colon); scorer fans out across them, `--provider`/`--model` is the primary and first member |
+| `--quorum` | v3 | Strict-majority quorum for `--ensemble` (default `floor(N/2)+1`); below quorum → finding flagged Unresolved |
 | `--web` | v3 | Start the local web interface (alias for `uvicorn vulntriage.webapp.app:app`) |
 | `--evaluate` | v2 | Run the evaluation experiment grid |
 | `--eval-config` | v2 | JSON config file for multi-model grid |
@@ -337,7 +402,11 @@ CVE-2024-23897 Jenkins) + 7 service-class fallbacks. Each entry has
 
 Jinja2 template with inline CSS. Sections: header, executive summary, risk
 breakdown bars (fill width = risk score × 100%, colour by exploitability),
-per-finding cards with remediation, ranked table.
+per-finding cards with remediation, ranked table. In ensemble mode each
+finding card also renders an `Unresolved` badge (distinct grey, separate from
+the High/Med/Low colours) and a vote-breakdown box (`model=label, ...`); the
+executive summary gains a sentence naming the model count, quorum, and
+Unresolved count, and the summary grid adds an `Unresolved` stat tile.
 
 ### 12.5 Output Layout
 
@@ -359,7 +428,7 @@ The `output/` tree is tracked in git; `.gitkeep` files keep
 
 ## 13. Tests
 
-63 tests across 8 test files:
+82 tests across 11 test files:
 
 | File | Tests | What it covers |
 |---|---|---|
@@ -371,6 +440,9 @@ The `output/` tree is tracked in git; `.gitkeep` files keep
 | `test_cli.py` | 15 | Help text, text/HTML/PDF/both reports, HTML without `--remediate`, zero-shot+no-rag, save-intermediates (explicit + default path), multi-input merge, `--local-only` (triage + eval), timestamped run dirs, eval timestamped output, evaluate single-model, error handling |
 | `test_pipeline.py` | 6 | Extracted `run_pipeline()`: HTML+PDF render, text-to-stdout, default intermediates dir, explicit intermediates dir, remediation on/off |
 | `test_webapp.py` | 7 | Dashboard/forms render, new-run (sample + uploads) reaches `done`, stamp + Download PDF present, `--local-only` blocks cloud in the webapp, eval list |
+| `test_scorer_ensemble.py` | 8 | Strict-majority merge (quorum met / not / even-N unanimity / explicit quorum), single-client path unchanged, ensemble resolve + Unresolved splits |
+| `test_cli_ensemble.py` | 4 | `--ensemble`/`--quorum` parse, ensemble runs the pipeline and merges, invalid member rejected, `--local-only` blocks a cloud ensemble member |
+| `test_webapp_models_ensemble.py` | 7 | `/models` route (list / unknown / best-effort on exception), `/runs/new` form has local-only above provider + datalist + ensemble toggle, ensemble POST records params, mismatched-length rejection, local-only blocks ensemble cloud member |
 | `conftest.py` | — | `MockLLMClient` fixture (canned structured JSON responses) |
 
 All tests use mock LLM responses — no real model needed; the webapp tests patch `run_pipeline` so no model is required either.
@@ -414,11 +486,11 @@ project/
 ├── src/vulntriage/
 │   ├── __init__.py                  # Exports all models
 │   ├── models.py                    # Pydantic data models (v1 + RemediatedFinding v2)
-│   ├── llm.py                       # LLM client abstraction (v1, total_tokens v2)
+│   ├── llm.py                       # LLM client abstraction (v1; total_tokens v2; _provider_config + list_models v3)
 │   ├── parser.py                    # Scanner input parsers (v1)
 │   ├── scanner.py                   # Dockerized Nuclei runner (v1)
 │   ├── enricher.py                  # Context enrichment (v1)
-│   ├── scorer.py                    # Exploitability scoring (v1, few_shot param v2)
+│   ├── scorer.py                    # Exploitability scoring (v1, few_shot param v2, ensemble clients/quorum v3)
 │   ├── prioritizer.py               # Risk prioritization (v1)
 │   ├── reporter.py                  # Plain text report (v1)
 │   ├── remediator.py                # Remediation with RAG (v2, new)
@@ -441,11 +513,16 @@ project/
 │   ├── test_pipeline_integration.py
 │   ├── test_cli.py
 │   ├── test_pipeline.py             # run_pipeline() unit tests
+│   ├── test_scorer_ensemble.py      # Ensemble merge + Unresolved (v3)
+│   ├── test_cli_ensemble.py         # --ensemble / --quorum CLI (v3)
+│   ├── test_webapp_models_ensemble.py # /models route + ensemble POST (v3)
 │   └── test_webapp.py               # FastAPI TestClient webapp tests
 ├── docs/
 │   ├── specs/
-│   │   ├── triage-pipeline-design.md        # v1 design spec
-│   │   └── triage-pipeline-v2-design.md     # v2 design spec
+│   │   ├── triage-pipeline-design.md            # v1 design spec
+│   │   ├── triage-pipeline-v2-design.md         # v2 design spec
+│   │   ├── webapp-design.md                     # Webapp design spec
+│   │   └── ensemble-and-model-picker-design.md  # Ensemble + /models + local-only reorder (v3)
 │   └── plans/
 │       └── triage-pipeline-v2-plan.md       # Implementation plan
 ├── output/                         # Tracked in git; run outputs never overwritten
@@ -471,15 +548,29 @@ implemented; the web frontend remains future work.
 - **`--local-only` mode** — the `LLMClient` carries a `local` flag
   (`True` for self-hosted providers); the CLI `--local-only` flag uses
   `LOCAL_PROVIDERS` (`lmstudio`/`ollama`/`llamacpp`/`vllm`) to refuse cloud
-  providers before any network call, in both triage and `--evaluate` modes.
+  providers before any network call, in both triage and `--evaluate` modes
+  (and across every `--ensemble` member).
 - **Scan → triage in one command** — `--scan nuclei --target … --provider …
   --model …` runs the dockerized Nuclei scan and continues straight into
   triage; `--scan-only` skips triage.
 - **Run outputs no longer overwritten** — triage reports go to
   `output/runs/<ts>/` and eval results to `output/eval/<ts>/` (timestamped);
   `--save-intermediates` (no value) defaults to `<run_dir>/intermediates/`.
+- **Local-only above provider (webapp)** — the "Block cloud providers"
+  checkbox renders above the provider `<select>` in both the triage and eval
+  intake forms so it visually gates the provider list before the operator
+  picks one.
+- **Model picker from `/models`** — the model field is a `<datalist>`-backed
+  `<input>` populated from the provider's OpenAI-compatible `/models` endpoint
+  (best-effort; on failure it falls back to plain free text). A custom model
+  name can always be typed, by the HTML primitive.
+- **Multi-LLM ensemble (scoring only)** — `--ensemble` / `--quorum` and the
+  webapp "Multi-LLM ensemble" toggle run the exploitability scorer against N
+  models and merge by strict-majority quorum (default `⌊N/2⌋+1`); findings
+  where no label reaches quorum are flagged `Unresolved`. See §6.1.
 
-**Remaining future work:** none tracked in `todo.txt` after this iteration.
+**Remaining future work:** none tracked in `todo.txt` after this iteration
+(all three original items shipped and struck through).
 
 **Additional limitations relevant to the thesis evaluation:**
 
@@ -495,6 +586,23 @@ disk cache keyed by `(model, prompt)` would cut cost and improve
   reproducibility for re-runs.
 - **Temperature fixed at 0.2** — not configurable from the CLI; the v2 design
   flagged temp=0 for eval runs as a non-determinism mitigation.
+- **Ensemble scope is scoring-only** — enrichment and remediation are
+  deliberately not fanned out (merging prose is messy and doesn't directly
+  address false positives); see `ensemble-and-model-picker-design.md` for the
+  rationale. A whole-pipeline replication mode is left as future work.
+- **`Unresolved` findings still get a risk score and rank** — the merge sets
+  `exploitability` to the highest tally label so the deterministic prioritizer
+  ranks an unresolved finding somewhere, which is a deliberate bias toward
+  surfacing rather than hiding; the thesis should report the Unresolved count
+  alongside the High/Medium/Low distribution so the reader sees how often the
+  models disagreed.
+- **`/models` is best-effort and provider-shape-dependent** — model id parsing
+  tries `data[].id` then `body.model` then `model`; providers with unusual
+  shapes may return an empty list (in which case the operator types the model
+  name by hand). The route never blocks a run on a `/models` failure.
+- **Ensemble inside `--evaluate` is out of scope** — the eval grid already
+  varies models across cells, so ensemble-on-eval would double-count; the two
+  features are kept independent.
 
 ---
 
@@ -518,6 +626,7 @@ database, no separate run model.
 | `/runs/<id>/report.html` | GET | The rendered HTML report (served from disk) |
 | `/runs/<id>/report.pdf` | GET | The PDF report, as a download (`application/pdf`) |
 | `/runs/<id>/download` | GET | Intermediates as a zip |
+| `/models?provider=<name>` | GET | Best-effort model list for the picker: `{"models": [...], "error": null\|str}` |
 | `/eval`, `/eval/new`, `/eval/<id>` | GET/POST | Evaluation grid launch + dossier + metrics table |
 
 ### 17.2 Run model
@@ -537,14 +646,40 @@ itself. The webapp calls the same `vulntriage.pipeline.run_pipeline` (and
 `vulntriage.evaluation.run_experiment`) the CLI uses, so behaviour is
 identical.
 
-### 17.3 PDF download
+### 17.3 Intake form: provider/model picker, local-only, ensemble
+
+The intake form (`/runs/new`, mirrored at `/eval/new` for the eval grid)
+orders the controls so the gate comes first and the suggestions follow:
+
+1. **Local-only** checkbox sits **above** the provider `<select>` so it
+   visually gates the provider list before the operator picks one. Toggling it
+   hides non-local `<option>`s and auto-switches to the first local provider,
+   refreshing the model datalist in the same handler.
+2. **Provider** `<select>` and **Model** `<input list="models-dl">` — the
+   `<datalist>` is repopulated from `/models` on every provider change.
+   `<datalist>` is pure suggestion, so a custom model name can always be typed;
+   on `/models` failure the datalist is emptied and free text remains.
+3. **Multi-LLM ensemble (scoring only)** checkbox reveals an "Add scoring
+   model" section that appends extra (provider, model) rows reusing the same
+   datalist, plus a **Quorum** field (default `⌊N/2⌋+1`, editable). The
+   primary provider/model above is the first ensemble member and is used for
+   enrichment + remediation. Unchecking the toggle clears the extra rows so
+   the submission is identical to a single-model POST.
+
+`POST /runs/new` accepts repeated `ensemble_provider[]`/`ensemble_model[]`
+fields plus `quorum`; the worker builds N scoring clients and one primary
+client, and stores `ensemble` + `quorum` under `RunRecord.params`. The dossier
+manifest shows an "Ensemble (scoring)" field with the member list and quorum
+when set, and the counts row adds an `Unresolved` total.
+
+### 17.4 PDF download
 
 Every web-driven triage run renders **both** `report.html` (shown in an
 `<iframe>` on the dossier) and `report.pdf` (the Download PDF button)
 regardless of the `--remediate` toggle, so the file offered for download is
 byte-identical to what `--output-format both` would produce from the CLI.
 
-### 17.4 Design — "Case File"
+### 17.5 Design — "Case File"
 
 The UI treats each run as a physical case file: a paper-buff folder with
 pre-printed form boxes and a rubber-stamp status mark. The signature element

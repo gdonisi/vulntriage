@@ -34,6 +34,16 @@
         {% if record.params.get("reasoning_effort") %} · effort {{ record.params.reasoning_effort }}{% endif %}
       </div>
     </div>
+    {% if record.params.get("ensemble") %}
+    <div class="field">
+      <div class="field-label">Ensemble (scoring)</div>
+      <div class="field-value">
+        {{ record.params.ensemble|length }} model(s) + primary · quorum
+        {% if record.params.get("quorum") %}{{ record.params.quorum }}{% else %}auto{% endif %}<br>
+        {% for m in record.params.ensemble %}{{ m.provider }}/{{ m.model }}{% if not loop.last %}, {% endif %}{% endfor %}
+      </div>
+    </div>
+    {% endif %}
     <div class="field">
       <div class="field-label">Prompt strategy</div>
       <div class="field-value">{{ record.params.get("prompt_strategy", "—") }}</div>
@@ -65,6 +75,7 @@
           <span class="c sev high"><b>{{ record.counts.high }}</b>High</span>
           <span class="c sev medium"><b>{{ record.counts.medium }}</b>Medium</span>
           <span class="c sev low"><b>{{ record.counts.low }}</b>Low</span>
+          {% if record.counts.unresolved %}<span class="c sev"><b>{{ record.counts.unresolved }}</b>Unresolved</span>{% endif %}
         </div>
       </div>
     </div>

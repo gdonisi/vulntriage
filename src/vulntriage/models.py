@@ -47,11 +47,23 @@ class EnrichedFinding(RawFinding):
 
 
 class ScoredFinding(EnrichedFinding):
-    """An enriched finding with an exploitability label and rationale."""
+    """An enriched finding with an exploitability label and rationale.
+
+    The three ``ensemble_*`` fields are populated only when the scorer ran in
+    multi-LLM ensemble mode (see ``score_all``). They default to empty/None/
+    False so a single-model ``ScoredFinding`` is unaffected and existing
+    callers/tests are untouched.
+    """
 
     exploitability: Exploitability
     exploitability_rationale: str = ""
     scoring_model: str | None = None
+    # Ensemble only — ``model_name -> label`` for each scoring model.
+    exploitability_votes: dict[str, str] = Field(default_factory=dict)
+    # Ensemble only — accepted strict-majority quorum threshold.
+    ensemble_quorum: int | None = None
+    # Ensemble only — True when no label reached quorum (display-only).
+    ensemble_unresolved: bool = False
 
 
 class PrioritizedFinding(ScoredFinding):

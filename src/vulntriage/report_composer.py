@@ -28,16 +28,46 @@ def _build_context(findings: Sequence[PrioritizedFinding]) -> dict:
     read via ``getattr`` so the template renders with empty remediation
     sections when the finding was not remediated.
     """
-    high = sum(1 for f in findings if f.exploitability.value == "High")
-    medium = sum(1 for f in findings if f.exploitability.value == "Medium")
-    low = sum(1 for f in findings if f.exploitability.value == "Low")
+    high = sum(
+        1
+        for f in findings
+        if f.exploitability.value == "High" and not getattr(f, "ensemble_unresolved", False)
+    )
+    medium = sum(
+        1
+        for f in findings
+        if f.exploitability.value == "Medium" and not getattr(f, "ensemble_unresolved", False)
+    )
+    low = sum(
+        1
+        for f in findings
+        if f.exploitability.value == "Low" and not getattr(f, "ensemble_unresolved", False)
+    )
+    unresolved = sum(1 for f in findings if getattr(f, "ensemble_unresolved", False))
     top = findings[0] if findings else None
 
+    # Detect ensemble mode from any finding carrying votes.
+    ensemble = any(getattr(f, "exploitability_votes", {}) for f in findings)
+    quorum = next(
+        (
+            getattr(f, "ensemble_quorum", None)
+            for f in findings
+            if getattr(f, "ensemble_quorum", None) is not None
+        ),
+        None,
+    )
+    n_models = max((len(getattr(f, "exploitability_votes", {})) for f in findings), default=0)
     executive_text = (
         f"This report covers {len(findings)} vulnerability finding(s) triaged by the "
         f"LLM-driven pipeline. Of these, {high} are rated High exploitability, "
         f"{medium} Medium, and {low} Low. "
     )
+    if ensemble:
+        executive_text += (
+            f"Exploitability was scored by a {n_models}-model ensemble "
+            f"(strict-majority quorum {quorum}); {unresolved} finding(s) were "
+            "Unresolved (no label reached the quorum) and flagged for review. "
+        )
     if top:
         executive_text += (
             f"The highest-priority finding is: {top.description} "
@@ -60,7 +90,15 @@ def _build_context(findings: Sequence[PrioritizedFinding]) -> dict:
                 "cvss": f.cvss,
                 "risk_score": f.risk_score,
                 "asset_criticality": f.asset_criticality,
-                "exploitability": f.exploitability.value,
+                "exploitability": (
+                    "Unresolved"
+                    if getattr(f, "ensemble_unresolved", False)
+                    else f.exploitability.value
+                ),
+                # stable High/Med/Low for badge color
+                "exploitability_class": f.exploitability.value,
+                "ensemble_unresolved": getattr(f, "ensemble_unresolved", False),
+                "exploitability_votes": getattr(f, "exploitability_votes", {}),
                 "context": f.context,
                 "exploitability_rationale": f.exploitability_rationale,
                 "remediation_steps": getattr(f, "remediation_steps", []),
@@ -77,6 +115,10 @@ def _build_context(findings: Sequence[PrioritizedFinding]) -> dict:
             "high": high,
             "medium": medium,
             "low": low,
+            "unresolved": unresolved,
+            "ensemble": ensemble,
+            "n_models": n_models if ensemble else 0,
+            "quorum": quorum if ensemble else None,
             "executive_text": executive_text,
         },
         "findings": finding_dicts,

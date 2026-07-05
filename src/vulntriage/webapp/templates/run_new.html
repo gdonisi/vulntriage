@@ -45,19 +45,34 @@
 
   <hr>
 
+  {# Local-only sits ABOVE the provider rows so it gates them visually. #}
   <div class="row">
+    <label>Block cloud providers</label>
+    <div class="check">
+      <input type="checkbox" id="local_only" name="local_only" value="1"
+             onchange="VulnTriage.onLocalOnlyToggle(this.checked)">
+      <label for="local_only">Local only — restrict to {{ local_providers|join(', ') }}</label>
+    </div>
+  </div>
+
+  {# Primary provider + model (also used for enrichment & remediation, and is
+     the first member of the ensemble when ensemble mode is on). #}
+  <div class="row model-row" data-model-row>
     <label>Provider <span class="req">*</span></label>
-    <select name="provider" required>
+    <select name="provider" required onchange="VulnTriage.refreshModels(this)">
       {% for p in providers %}
-        <option value="{{ p.name }}" {% if not loop.first %}{% endif %}>{{ p.name }}{% if p.local %} (local){% endif %}</option>
+        <option value="{{ p.name }}" data-local="{{ '1' if p.local else '' }}">{{ p.name }}{% if p.local %} (local){% endif %}</option>
       {% endfor %}
     </select>
   </div>
 
-  <div class="row">
+  <div class="row model-row" data-model-row>
     <label>Model <span class="req">*</span></label>
-    <input type="text" name="model" required placeholder="qwen3.5-4b">
+    <input type="text" name="model" required placeholder="qwen3.5-4b"
+           list="models-dl" autocomplete="off">
+    <div class="hint">Suggestions come from the provider's <code>/models</code> endpoint; you can always type a custom name.</div>
   </div>
+  <datalist id="models-dl"></datalist>
 
   <div class="row">
     <label>Reasoning effort</label>
@@ -68,6 +83,30 @@
       <option value="high">high</option>
     </select>
     <div class="hint">Provider support varies. Omit for standard (non-reasoning) models.</div>
+  </div>
+
+  <div class="row check">
+    <input type="checkbox" id="ensemble_toggle" name="ensemble_toggle" value="1"
+           onchange="VulnTriage.onEnsembleToggle(this.checked)">
+    <label for="ensemble_toggle">Multi-LLM ensemble (scoring only) — score each finding with N models and merge by strict majority to reduce false positives</label>
+  </div>
+
+  <div id="ensemble-fields" style="display:none;">
+    <div class="hint" style="margin-bottom:8px;">
+      The primary provider/model above is the first ensemble member (and runs
+      enrichment + remediation). Add extra models here for the scorer only.
+      Default quorum is <code>floor(N/2)+1</code> (a genuine majority — for
+      even N this requires unanimity).
+    </div>
+    <div id="ensemble-rows"></div>
+    <div class="row">
+      <button type="button" class="btn ghost" onclick="VulnTriage.addEnsembleRow()">+ Add scoring model</button>
+    </div>
+    <div class="row">
+      <label>Quorum</label>
+      <input type="number" name="quorum" min="1" placeholder="auto (floor(N/2)+1)">
+      <div class="hint">Minimum models that must agree on a label for it to be accepted. Leave blank for the strict-majority default. Below quorum → finding is flagged <em>Unresolved</em>.</div>
+    </div>
   </div>
 
   <div class="row">
@@ -88,7 +127,7 @@
   </div>
 
   <div class="row check">
-    <input type="checkbox" id="remediate" name="remediate" value="1">
+    <input type="checkbox" id="remediate" name="remediate" value="1" checked>
     <label for="remediate">Generate remediation (LLM) — enables RAG grounding</label>
   </div>
 
@@ -100,22 +139,6 @@
   <div class="row check">
     <input type="checkbox" id="save_intermediates" name="save_intermediates" value="1">
     <label for="save_intermediates">Save intermediates (enriched/scored/prioritized/remediated JSON)</label>
-  </div>
-
-  <div class="row">
-    <label>Block cloud providers</label>
-    <div class="check">
-      <input type="checkbox" id="local_only" name="local_only" value="1"
-             onchange="
-               var cb=this.checked;
-               document.querySelectorAll('select[name=provider] option').forEach(function(o){
-                 o.hidden = cb && !o.textContent.includes('(local)');
-               });
-               var pc=document.querySelector('select[name=provider]');
-               if (cb && pc.selectedOptions[0].hidden){ pc.selectedIndex=0; pc.dispatchEvent(new Event('change')); }
-             ">
-      <label for="local_only">Local only — restrict to {{ local_providers|join(', ') }}</label>
-    </div>
   </div>
 
   <div class="actions">

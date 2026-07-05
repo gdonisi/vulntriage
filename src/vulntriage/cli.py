@@ -183,6 +183,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exploitability scorer prompting strategy (default: few-shot, the v1 behaviour)",
     )
     p.add_argument(
+        "--ensemble",
+        help=(
+            "Comma-separated extra scoring models for a multi-LLM ensemble, each "
+            "as 'provider:model' (split on the first colon). Only the exploitability "
+            "scorer fans out; --provider/--model is the primary (used for enrichment + "
+            "remediation and is the first ensemble member). Example: "
+            "'ollama:llama3.1,openai:gpt-4o-mini'."
+        ),
+    )
+    p.add_argument(
+        "--quorum",
+        type=int,
+        default=None,
+        help=(
+            "Strict-majority quorum for ensemble scoring (default: floor(N/2)+1). "
+            "A label is accepted only if >= quorum models agree; otherwise the finding "
+            "is flagged Unresolved."
+        ),
+    )
+    p.add_argument(
         "--web",
         action="store_true",
         help="Start the local web interface (alias for: uv run uvicorn vulntriage.webapp.app:app)",
@@ -200,7 +220,11 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
-def _check_local_only(provider: str | None, models: list[ModelSpec] | None = None) -> str | None:
+def _check_local_only(
+    provider: str | None,
+    models: list[ModelSpec] | None = None,
+    ensemble: list[tuple[str, str]] | None = None,
+) -> str | None:
     """Validate the --local-only constraint. Returns an error message or None."""
     offenders: list[str] = []
     if provider is not None and not is_local_provider(provider):
@@ -209,6 +233,10 @@ def _check_local_only(provider: str | None, models: list[ModelSpec] | None = Non
         for m in models:
             if not is_local_provider(m.provider):
                 offenders.append(f"{m.provider}/{m.model}")
+    if ensemble:
+        for prov, mdl in ensemble:
+            if not is_local_provider(prov):
+                offenders.append(f"{prov}:{mdl}")
     if offenders:
         return (
             "--local-only is set but cloud provider(s) requested: "
@@ -216,6 +244,23 @@ def _check_local_only(provider: str | None, models: list[ModelSpec] | None = Non
             + f". Allowed local providers: {', '.join(sorted(LOCAL_PROVIDERS))}."
         )
     return None
+
+
+def _parse_ensemble(spec: str) -> list[tuple[str, str]]:
+    """Parse '--ensemble a:b,c:d' into [(a, b), (c, d)] (first-colon split)."""
+    out: list[tuple[str, str]] = []
+    for chunk in spec.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if ":" not in chunk:
+            raise ValueError(f"Invalid --ensemble member {chunk!r}: expected 'provider:model'")
+        prov, mdl = chunk.split(":", 1)
+        prov, mdl = prov.strip(), mdl.strip()
+        if not prov or not mdl:
+            raise ValueError(f"Invalid --ensemble member {chunk!r}: empty provider or model")
+        out.append((prov, mdl))
+    return out
 
 
 def _run_evaluate(args: argparse.Namespace) -> int:
@@ -271,7 +316,7 @@ def _run_web(args: argparse.Namespace) -> int:
     uvicorn.run(
         "vulntriage.webapp.app:app",
         host="127.0.0.1",
-        port=8000,
+        port=9000,
         reload=False,
         log_level="info",
     )
@@ -296,9 +341,25 @@ def main(argv: list[str] | None = None) -> int:
         print("--provider and --model are required for the triage pipeline", file=sys.stderr)
         return 2
 
-    # --local-only gates cloud providers for the triage pipeline.
+    # Ensemble is a triage-run feature; parse + validate it here.
+    ensemble_members: list[tuple[str, str]] = []
+    if args.ensemble:
+        if args.scan_only:
+            print("--ensemble cannot be combined with --scan-only", file=sys.stderr)
+            return 2
+        try:
+            ensemble_members = _parse_ensemble(args.ensemble)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        if not ensemble_members:
+            print("--ensemble needs at least one provider:model member", file=sys.stderr)
+            return 2
+
+    # --local-only gates cloud providers for the triage pipeline (including
+    # every ensemble member).
     if not args.scan_only and args.local_only:
-        err = _check_local_only(args.provider)
+        err = _check_local_only(args.provider, ensemble=ensemble_members or None)
         if err:
             print(err, file=sys.stderr)
             return 2
@@ -330,12 +391,24 @@ def main(argv: list[str] | None = None) -> int:
         print("[pipeline] no findings to process")
         return 0
 
-    # 3. Build LLM client.
+    # 3. Build LLM client(s).
     client = make_client(
         args.provider,
         args.model,
         reasoning_effort=args.reasoning_effort,
     )
+    # Ensemble scoring clients: the primary is first, then the extras.
+    scoring_clients = None
+    if ensemble_members:
+        extras = [
+            make_client(prov, mdl, reasoning_effort=args.reasoning_effort)
+            for prov, mdl in ensemble_members
+        ]
+        scoring_clients = [client, *extras]
+        print(
+            f"[pipeline] ensemble of {len(scoring_clients)} scoring model(s) "
+            f"(quorum={args.quorum or (len(scoring_clients) // 2 + 1)})"
+        )
 
     # Compute the run id once so the report dir and the intermediates dir share it.
     ts = _timestamp()
@@ -367,6 +440,8 @@ def main(argv: list[str] | None = None) -> int:
         save_intermediates_flag=save_inter,
         intermediates_dir=explicit_inter,
         text_output=args.output if args.output_format == "text" else None,
+        scoring_clients=scoring_clients,
+        scoring_quorum=args.quorum,
     )
     if result.text_report is not None:
         print(result.text_report)

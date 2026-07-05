@@ -18,7 +18,7 @@ finding was rated — without leaving the browser.
 
 ## Assumptions
 
-1. **Local-only deployment.** The app runs on `127.0.0.1:8000` via `uv run
+1. **Local-only deployment.** The app runs on `127.0.0.1:9000` via `uv run
    uvicorn`. No auth, no HTTPS, no production hardening — it's a research
    instrument.
 2. **The CLI is the source of truth for run layout.** A "run" is exactly a
@@ -57,7 +57,7 @@ finding was rated — without leaving the browser.
 ### Architecture
 
 ```
-FastAPI app (uvicorn, 127.0.0.1:8000)
+FastAPI app (uvicorn, 127.0.0.1:9000)
   ├── GET  /                    dashboard: recent runs + eval runs + "New run" CTA
   ├── GET  /runs                list of triage runs (file-browser of output/runs/)
   ├── GET  /runs/new            intake form (pre-printed-form styled)

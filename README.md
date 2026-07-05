@@ -42,6 +42,14 @@ OPENROUTER_API_KEY=sk-... uv run python main.py --input data/synthetic_findings.
 OPENAI_API_KEY=sk-... uv run python main.py --input data/synthetic_findings.json \
     --provider openai --model gpt-5.4-nano --reasoning-effort high
 
+# Multi-LLM ensemble (scoring only): the primary runs enrichment + remediation,
+# and N models score each finding's exploitability; labels merge by strict-
+# majority quorum (default floor(N/2)+1) to reduce false positives. Findings
+# where no label reaches quorum are flagged Unresolved.
+uv run python main.py --input data/synthetic_findings.json \
+    --provider lmstudio --model qwen3.5-4b \
+    --ensemble ollama:llama3.1,openai:gpt-4o-mini --quorum 2 --remediate
+
 # Disable RAG / use zero-shot prompting
 uv run python main.py --input data/synthetic_findings.json \
     --provider lmstudio --model qwen3.5-4b --remediate --no-rag \
@@ -86,11 +94,17 @@ uv run python main.py --web
 # or: uv run uvicorn vulntriage.webapp.app:app --reload
 ```
 
-Open <http://127.0.0.1:8000>. From the dashboard you can:
+Open <http://127.0.0.1:9000>. From the dashboard you can:
 
 - **Start a triage run** — upload one or more scanner outputs (or use the
   bundled sample dataset), pick a provider/model, toggle remediation/RAG, or
-  run a Nuclei scan against a target and continue straight into triage.
+  run a Nuclei scan against a target and continue straight into triage. The
+  model field is backed by a `/models` datalist fetched from the provider's
+  OpenAI-compatible `/models` endpoint (best-effort; a custom model name can
+  always be typed). The **Local only** checkbox sits above the provider rows
+  and gates them. Tick **Multi-LLM ensemble (scoring only)** to score each
+  finding with N models and merge by strict-majority quorum (findings where
+  no label reaches quorum are flagged Unresolved).
 - **Read the dossier** — the run's stamped status mark, a pre-printed manifest
   (provider, model, inputs, finding counts), the live progress log while
   running, and the embedded report once done.
@@ -105,7 +119,7 @@ the same run layout under `output/runs/<id>/` and `output/eval/<id>/`, and
 the same `--local-only` gate. Runs created from the CLI appear in the webapp
 and vice versa; a server restart recovers interrupted runs from disk.
 
-See `docs/specs/webapp-design.md` for the design.
+See `docs/specs/webapp-design.md` for the design and `docs/specs/ensemble-and-model-picker-design.md` for the ensemble / model-picker / local-only changes.
 
 ## Evaluation harness
 

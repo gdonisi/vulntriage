@@ -91,12 +91,124 @@ class OpenAICompatibleClient:
         )
         return content
 
+    def list_models(self) -> list[str]:
+        """Best-effort enumeration of models the provider exposes.
+
+        Uses the OpenAI-compatible ``GET /models`` endpoint. Returns a sorted,
+        deduped list of model id strings; on any error (endpoint missing,
+        auth, transport) returns ``[]`` so callers can fall back to free text.
+        """
+        try:
+            page = self._client.models.list()
+        except Exception:  # noqa: BLE001 — best-effort; never raise
+            return []
+        ids: list[str] = []
+        data = getattr(page, "data", None) or []
+        for item in data:
+            mid = (
+                getattr(item, "id", None)
+                or _nested(item, "body", "model")
+                or _nested(item, "model")
+            )
+            if isinstance(mid, str) and mid:
+                ids.append(mid)
+        seen: set[str] = set()
+        uniq = []
+        for mid in sorted(ids):
+            if mid not in seen:
+                seen.add(mid)
+                uniq.append(mid)
+        return uniq
+
+
+def _nested(obj: object, *path: str) -> str | None:
+    cur: object = obj
+    for key in path:
+        if isinstance(cur, dict):
+            cur = cur.get(key)
+        else:
+            cur = getattr(cur, key, None)
+        if cur is None:
+            return None
+    return cur if isinstance(cur, str) else None
+
 
 def _require_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
         raise ValueError(f"Missing required environment variable: {name}")
     return value
+
+
+# ---------------------------------------------------------------------------
+# Provider configuration
+# --------------------------------------------------------------------------- #
+#
+# A single source of truth for per-provider connection details. Both
+# ``make_client`` (chat completions) and ``list_models`` (model enumeration)
+# route through `_provider_config` so they never disagree about the base URL
+# or the local/cloud flag.
+#
+# Each value is (base_url, api_key, local). ``api_key`` is resolved lazily: a
+# string means "read from env", ``None`` means "no auth (local)".
+
+
+def _provider_config(provider: str) -> tuple[str, str | None, bool]:
+    """Return ``(base_url, api_key, local)`` for *provider*.
+
+    Raises ``ValueError`` for unknown providers. Cloud providers read their
+    key from the environment (raising if missing); local providers get a
+    placeholder key.
+    """
+    p = provider.strip().lower()
+    if p == "lmstudio":
+        return (
+            os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
+            os.environ.get("LMSTUDIO_API_KEY", "lm-studio"),
+            True,
+        )
+    if p == "ollama":
+        return (
+            os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            os.environ.get("OLLAMA_API_KEY", "ollama"),
+            True,
+        )
+    if p in {"llamacpp", "llama.cpp"}:
+        return (
+            os.environ.get("LLAMACPP_BASE_URL", "http://localhost:8080/v1"),
+            os.environ.get("LLAMACPP_API_KEY", "llama.cpp"),
+            True,
+        )
+    if p == "vllm":
+        return (
+            os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1"),
+            os.environ.get("VLLM_API_KEY", "vllm"),
+            True,
+        )
+    if p == "openai":
+        return "https://api.openai.com/v1", _require_env("OPENAI_API_KEY"), False
+    if p == "openrouter":
+        return (
+            "https://openrouter.ai/api/v1",
+            _require_env("OPENROUTER_API_KEY"),
+            False,
+        )
+    if p == "anthropic":
+        return "https://api.anthropic.com/v1/", _require_env("ANTHROPIC_API_KEY"), False
+    if p == "google":
+        return (
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+            _require_env("GEMINI_API_KEY"),
+            False,
+        )
+    if p == "deepseek":
+        return "https://api.deepseek.com", _require_env("DEEPSEEK_API_KEY"), False
+    msg = (
+        f"Unknown provider: {provider!r} "
+        "(expected one of: 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'openai', "
+        "'openrouter', 'anthropic', 'google', 'deepseek')"
+    )
+    raise ValueError(msg)
 
 
 # Self-hosted providers (the same set that sets ``local=True`` on the client).
@@ -127,92 +239,28 @@ def make_client(
         ``None`` (default) = no reasoning (standard behaviour).
         Pass ``"low"``, ``"medium"``, or ``"high"`` to enable.
     """
-    provider = provider.strip().lower()
-
-    if provider == "lmstudio":
-        return OpenAICompatibleClient(
-            base_url=os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
-            api_key=os.environ.get("LMSTUDIO_API_KEY", "lm-studio"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=True,
-        )
-
-    if provider == "ollama":
-        return OpenAICompatibleClient(
-            base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-            api_key=os.environ.get("OLLAMA_API_KEY", "ollama"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=True,
-        )
-
-    if provider in {"llamacpp", "llama.cpp"}:
-        return OpenAICompatibleClient(
-            base_url=os.environ.get("LLAMACPP_BASE_URL", "http://localhost:8080/v1"),
-            api_key=os.environ.get("LLAMACPP_API_KEY", "llama.cpp"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=True,
-        )
-
-    if provider == "vllm":
-        return OpenAICompatibleClient(
-            base_url=os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1"),
-            api_key=os.environ.get("VLLM_API_KEY", "vllm"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=True,
-        )
-
-    if provider == "openai":
-        return OpenAICompatibleClient(
-            base_url="https://api.openai.com/v1",
-            api_key=_require_env("OPENAI_API_KEY"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=False,
-        )
-
-    if provider == "openrouter":
-        return OpenAICompatibleClient(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=_require_env("OPENROUTER_API_KEY"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=False,
-        )
-
-    if provider == "anthropic":
-        return OpenAICompatibleClient(
-            base_url="https://api.anthropic.com/v1/",
-            api_key=_require_env("ANTHROPIC_API_KEY"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=False,
-        )
-
-    if provider == "google":
-        return OpenAICompatibleClient(
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            api_key=_require_env("GEMINI_API_KEY"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=False,
-        )
-
-    if provider == "deepseek":
-        return OpenAICompatibleClient(
-            base_url="https://api.deepseek.com",
-            api_key=_require_env("DEEPSEEK_API_KEY"),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            local=False,
-        )
-
-    msg = (
-        f"Unknown provider: {provider!r} "
-        "(expected one of: 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'openai', "
-        "'openrouter', 'anthropic', 'google', 'deepseek')"
+    base_url, api_key, local = _provider_config(provider)
+    return OpenAICompatibleClient(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        local=local,
     )
-    raise ValueError(msg)
+
+
+def list_models(provider: str) -> list[str]:
+    """Best-effort enumeration of a provider's available models.
+
+    Routes through :class:`OpenAICompatibleClient` so the base URL and auth
+    match ``make_client`` exactly. Returns a sorted, deduped list; on any
+    connection/auth error returns ``[]`` so the model picker can fall back to
+    free-text input without blocking the run.
+    """
+    base_url, api_key, local = _provider_config(provider)
+    # An ephemeral client with a throwaway model name; ``list_models`` doesn't
+    # open a chat completion, so the model isn't validated server-side.
+    client = OpenAICompatibleClient(
+        base_url=base_url, api_key=api_key, model="__list_models__", local=local
+    )
+    return client.list_models()

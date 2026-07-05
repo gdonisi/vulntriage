@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ..llm import LOCAL_PROVIDERS, is_local_provider
+from ..llm import LOCAL_PROVIDERS, is_local_provider, list_models
 from . import runs as runs_mod
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -157,6 +157,23 @@ def run_new_form(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/models", response_class=JSONResponse)
+def models_for_provider(provider: str) -> JSONResponse:
+    """Best-effort enumeration of a provider's models for the model picker.
+
+    Returns ``{"models": [...], "error": null}``. If the provider is unknown,
+    auth is missing, or the endpoint is unreachable, ``models`` is ``[]`` and
+    ``error`` carries a short message so the client can fall back to free text.
+    """
+    if provider not in PROVIDERS:
+        return JSONResponse({"models": [], "error": f"unknown provider: {provider}"})
+    try:
+        models = list_models(provider)
+    except Exception as e:  # noqa: BLE001 — best-effort; never block the form
+        return JSONResponse({"models": [], "error": str(e)})
+    return JSONResponse({"models": models, "error": None})
+
+
 @app.post("/runs/new")
 async def run_new_submit(
     mode: str = Form("dataset"),
@@ -173,8 +190,29 @@ async def run_new_submit(
     prompt_strategy: str = Form("few-shot"),
     asset_registry: str = Form(""),
     save_intermediates: bool = Form(False),
+    # Ensemble (optional): repeated provider/model pairs + a quorum.
+    ensemble_provider: list[str] = Form(default_factory=list),  # noqa: B008
+    ensemble_model: list[str] = Form(default_factory=list),  # noqa: B008
+    quorum: int | None = Form(None),
 ) -> RedirectResponse:
     _validate_provider(provider, local_only)
+
+    # Validate + normalize the ensemble. The primary (provider, model) is the
+    # first ensemble member; the extras are zipped from the repeated fields.
+    ensemble: list[tuple[str, str]] | None = None
+    if ensemble_provider or ensemble_model:
+        if len(ensemble_provider) != len(ensemble_model):
+            raise HTTPException(
+                status_code=400,
+                detail="ensemble_provider and ensemble_model must be the same length",
+            )
+        members = list(zip(ensemble_provider, ensemble_model, strict=False))
+        # All-cloud checking for the extras (the primary is checked above).
+        for prov, mdl in members:
+            _validate_provider(prov, local_only)
+            if not mdl.strip():
+                raise HTTPException(status_code=400, detail="ensemble model must not be empty")
+        ensemble = members
 
     reasoning = reasoning_effort or None
     asset = asset_registry or None
@@ -194,6 +232,8 @@ async def run_new_submit(
             prompt_strategy=prompt_strategy,
             asset_registry=asset,
             save_intermediates=save_intermediates,
+            ensemble=ensemble,
+            quorum=quorum,
         )
         return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
@@ -227,6 +267,8 @@ async def run_new_submit(
         prompt_strategy=prompt_strategy,
         asset_registry=asset,
         save_intermediates=save_intermediates,
+        ensemble=ensemble,
+        quorum=quorum,
     )
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
@@ -386,5 +428,5 @@ def run() -> int:
     """Entry point for the ``vulntriage-web`` script."""
     import uvicorn
 
-    uvicorn.run("vulntriage.webapp.app:app", host="127.0.0.1", port=8000, log_level="info")
+    uvicorn.run("vulntriage.webapp.app:app", host="127.0.0.1", port=9000, log_level="info")
     return 0
