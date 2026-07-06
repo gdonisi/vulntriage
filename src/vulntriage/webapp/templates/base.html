@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}vulntriage{% endblock %}</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -22,6 +23,9 @@
   </svg>
 
   <nav class="tabs" aria-label="Sections">
+    <a class="tab brand" href="/">
+      <img src="/static/logo.png" alt="Vulntriage" class="nav-logo">
+    </a>
     <a class="tab {% block tab_runs %}{% endblock %}" href="/runs">Runs</a>
     <a class="tab {% block tab_new %}{% endblock %}" href="/runs/new">New run</a>
     <a class="tab {% block tab_eval %}{% endblock %}" href="/eval">Evaluation</a>

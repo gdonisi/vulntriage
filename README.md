@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="logo.jpg" alt="Logo" width="192" style="vertical-align: middle; margin-right: 8px;">
+  <span style="font-size: 36px; font-weight: 700; vertical-align: middle;">Vulntriage</span>
+</p>
+
 # LLM-Enabled Vulnerability Investigation and Triaging System
 
 An AI-driven vulnerability triage pipeline. It ingests scanner results, enriches each finding with LLM-generated threat context, scores exploitability (High/Medium/Low), prioritizes by composite risk, generates LLM remediation recommendations (optionally grounded by a light RAG knowledge base), and produces ranked HTML/PDF reports. A built-in evaluation harness runs an experiment grid to measure accuracy and throughput for the thesis.

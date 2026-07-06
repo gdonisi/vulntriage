@@ -61,6 +61,19 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; letter-spac
   position: relative;
   top: 1px;
   cursor: pointer;
+  text-decoration: none;
+}
+.tab.brand {
+  background: transparent;
+  border: none;
+  padding: 2px 14px 0 0;
+  margin-right: 4px;
+  top: 0;
+}
+.nav-logo {
+  height: 28px;
+  width: auto;
+  vertical-align: middle;
 }
 .tab:hover { text-decoration: none; color: var(--ink); }
 .tab.active {
