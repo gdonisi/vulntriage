@@ -1,7 +1,8 @@
 <p align="center">
-  <img src="logo.jpg" alt="Logo" width="192" style="vertical-align: middle; margin-right: 8px;">
-  <span style="font-size: 36px; font-weight: 700; vertical-align: middle;">Vulntriage</span>
+  <img src="logo.jpg" alt="Logo" width="192">
 </p>
+
+<h1 align="center">Vulntriage</h1>
 
 # LLM-Enabled Vulnerability Investigation and Triaging System
 
