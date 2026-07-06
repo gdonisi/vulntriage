@@ -22,6 +22,17 @@ services:
     networks:
       - default
       - vuln-net
+    environment:
+      # Use host.docker.internal so the container can reach local
+      # providers (LM Studio, Ollama, llama.cpp, vLLM) on the host.
+      # Override individual providers by setting their *_BASE_URL env var.
+      - LMSTUDIO_BASE_URL=http://host.docker.internal:1234/v1
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+      - LLAMACPP_BASE_URL=http://host.docker.internal:8080/v1
+      - VLLM_BASE_URL=http://host.docker.internal:8000/v1
+    extra_hosts:
+      # Ensures host.docker.internal resolves on Linux hosts too.
+      - "host.docker.internal:host-gateway"
     command: ["--web"]
     restart: unless-stopped
 
