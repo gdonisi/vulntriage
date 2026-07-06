@@ -39,7 +39,7 @@ class _CLIMockClient:
         return json.dumps({"context": "Mock threat context for the finding."})
 
 
-def _mock_make_client(provider, model, reasoning_effort=None):
+def _mock_make_client(provider, model, reasoning_effort=None, **kwargs):
     return _CLIMockClient()
 
 
@@ -384,3 +384,201 @@ def test_save_intermediates_default_path(monkeypatch, capsys, tmp_path):
     inter = run_dir / "intermediates"
     assert (inter / "enriched.json").exists()
     assert (inter / "remediated.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Custom provider tests
+# ---------------------------------------------------------------------------
+
+
+def test_custom_provider_works(monkeypatch, capsys, tmp_path):
+    """--provider custom --base-url with --local runs the pipeline."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    out = tmp_path / "report.txt"
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "custom",
+            "--base-url",
+            "http://localhost:8080/v1",
+            "--model",
+            "mock",
+            "--local",
+            "--output",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert out.exists()
+    assert "VULNERABILITY TRIAGE REPORT" in out.read_text()
+
+
+def test_custom_provider_with_api_key(monkeypatch, capsys, tmp_path):
+    """--provider custom --base-url --api-key works."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    out = tmp_path / "report.txt"
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "custom",
+            "--base-url",
+            "https://api.example.com/v1",
+            "--api-key",
+            "sk-test-key",
+            "--model",
+            "mock",
+            "--output",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert out.exists()
+
+
+def test_custom_provider_missing_base_url(capsys):
+    """--provider custom without --base-url is rejected."""
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "custom",
+            "--model",
+            "mock",
+        ]
+    )
+    assert rc == 2
+    assert "--base-url is required" in capsys.readouterr().err
+
+
+def test_base_url_rejected_with_builtin_provider(capsys):
+    """--base-url without --provider custom is rejected."""
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "lmstudio",
+            "--base-url",
+            "http://other:9999/v1",
+            "--model",
+            "mock",
+        ]
+    )
+    assert rc == 2
+    assert "--base-url is only meaningful with --provider custom" in capsys.readouterr().err
+
+
+def test_local_flag_rejected_with_builtin_provider(capsys):
+    """--local without --provider custom is rejected."""
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "openai",
+            "--local",
+            "--model",
+            "gpt-4o",
+        ]
+    )
+    assert rc == 2
+    assert "--local is only meaningful with --provider custom" in capsys.readouterr().err
+
+
+def test_api_key_rejected_with_builtin_provider(capsys):
+    """--api-key without --provider custom is rejected."""
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "openai",
+            "--api-key",
+            "sk-fake",
+            "--model",
+            "gpt-4o",
+        ]
+    )
+    assert rc == 2
+    assert "--api-key is only meaningful with --provider custom" in capsys.readouterr().err
+
+
+def test_custom_local_only_allowed(monkeypatch, capsys, tmp_path):
+    """--provider custom --local --local-only is accepted."""
+    monkeypatch.setattr("vulntriage.cli.make_client", _mock_make_client)
+    out = tmp_path / "report.txt"
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "custom",
+            "--base-url",
+            "http://localhost:8080/v1",
+            "--model",
+            "mock",
+            "--local",
+            "--local-only",
+            "--output",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert out.exists()
+
+
+def test_custom_without_local_blocked_by_local_only(capsys):
+    """--provider custom --local-only (without --local) is rejected."""
+    rc = main(
+        [
+            "--input",
+            str(DATA_DIR / "synthetic_findings.json"),
+            "--provider",
+            "custom",
+            "--base-url",
+            "https://api.cloud.com/v1",
+            "--model",
+            "mock",
+            "--local-only",
+        ]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "--local-only" in err
+    assert "custom" in err
+
+
+def test_custom_provider_list_models():
+    """list_models accepts custom base_url and api_key."""
+    from vulntriage.llm import list_models
+
+    # For a custom provider that doesn't exist, we expect an empty list (best-effort).
+    result = list_models("custom", base_url="http://localhost:1/v1", api_key="none")
+    assert result == []
+
+
+def test_custom_provider_config_requires_base_url():
+    """_provider_config('custom') without base_url raises ValueError."""
+    import pytest
+
+    from vulntriage.llm import _provider_config
+
+    with pytest.raises(ValueError, match="--base-url is required"):
+        _provider_config("custom")
+
+
+def test_custom_provider_config_with_base_url():
+    """_provider_config('custom') with base_url returns the given values."""
+    from vulntriage.llm import _provider_config
+
+    base_url, api_key, local = _provider_config(
+        "custom", base_url="http://localhost:8080/v1", api_key="my-key", local=True
+    )
+    assert base_url == "http://localhost:8080/v1"
+    assert api_key == "my-key"
+    assert local is True

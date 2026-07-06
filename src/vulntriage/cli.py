@@ -22,10 +22,23 @@ Only run the Nuclei scan, save output and exit:
 
     uv run python main.py --scan nuclei --target 192.168.1.5 --scan-only
 
+Use a custom OpenAI-compatible provider (local or cloud):
+
+    uv run python main.py --input data/synthetic_findings.json \
+        --provider custom --base-url http://localhost:8080/v1 --model my-model
+
+    uv run python main.py --input data/synthetic_findings.json \
+        --provider custom --base-url https://api.example.com/v1 \
+        --api-key sk-... --model gpt-4o
+
 Block cloud providers (only self-hosted backends allowed):
 
     uv run python main.py --input data/synthetic_findings.json \
         --provider lmstudio --model qwen3.5-4b --local-only
+
+    uv run python main.py --input data/synthetic_findings.json \
+        --provider custom --base-url http://localhost:8080/v1 \
+        --model my-model --local --local-only
 
 Run the evaluation experiment grid (single model):
 
@@ -88,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--provider",
         choices=[
+            "custom",
             "lmstudio",
             "ollama",
             "llamacpp",
@@ -101,10 +115,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="LLM provider (required unless --scan-only / --evaluate --eval-config is set)",
     )
     p.add_argument(
+        "--base-url",
+        default=None,
+        help="Base URL for the OpenAI-compatible endpoint (required when --provider custom)",
+    )
+    p.add_argument(
+        "--api-key",
+        default=None,
+        help="API key for the custom provider (optional; omit for keyless local servers)",
+    )
+    p.add_argument(
+        "--local",
+        action="store_true",
+        help="Mark a custom provider as self-hosted (for --local-only gating). "
+        "Only meaningful with --provider custom.",
+    )
+    p.add_argument(
         "--model",
         help=(
             "Model name for the chosen provider "
-            "(required unless --scan-only / --evaluate --eval-config is set)"
+            "(required unless --scan-only / --evaluate --eval-config is set). "
+            "For --provider custom, use any model name your endpoint recognises."
         ),
     )
     p.add_argument(
@@ -224,11 +255,18 @@ def _check_local_only(
     provider: str | None,
     models: list[ModelSpec] | None = None,
     ensemble: list[tuple[str, str]] | None = None,
+    custom_is_local: bool = False,
 ) -> str | None:
     """Validate the --local-only constraint. Returns an error message or None."""
     offenders: list[str] = []
-    if provider is not None and not is_local_provider(provider):
-        offenders.append(f"{provider}")
+    # For custom providers the local flag is set explicitly; for built-in
+    # providers we check against the hardcoded set.
+    if provider is not None:
+        if provider == "custom":
+            if not custom_is_local:
+                offenders.append("custom")
+        elif not is_local_provider(provider):
+            offenders.append(f"{provider}")
     if models:
         for m in models:
             if not is_local_provider(m.provider):
@@ -241,7 +279,8 @@ def _check_local_only(
         return (
             "--local-only is set but cloud provider(s) requested: "
             + ", ".join(sorted(set(offenders)))
-            + f". Allowed local providers: {', '.join(sorted(LOCAL_PROVIDERS))}."
+            + f". Allowed local providers: {', '.join(sorted(LOCAL_PROVIDERS))}"
+            + " (or use --provider custom --local)."
         )
     return None
 
@@ -263,9 +302,31 @@ def _parse_ensemble(spec: str) -> list[tuple[str, str]]:
     return out
 
 
+def _validate_custom_args(args: argparse.Namespace) -> str | None:
+    """Validate custom-provider-related CLI args. Returns an error or None."""
+    is_custom = args.provider == "custom" if args.provider else False
+    if args.base_url and not is_custom:
+        return "--base-url is only meaningful with --provider custom"
+    if args.api_key and not is_custom:
+        return "--api-key is only meaningful with --provider custom"
+    if args.local and not is_custom:
+        return "--local is only meaningful with --provider custom"
+    if is_custom and not args.base_url:
+        return "--base-url is required when --provider custom"
+    return None
+
+
 def _run_evaluate(args: argparse.Namespace) -> int:
     """Run the evaluation experiment grid."""
     ts = _timestamp()
+
+    # Custom provider validation for --evaluate (single-model path only).
+    if not args.eval_config:
+        err = _validate_custom_args(args)
+        if err:
+            print(err, file=sys.stderr)
+            return 2
+
     if args.eval_config:
         config = load_config(args.eval_config)
         # Fall back to a timestamped dir if the config doesn't specify one.
@@ -356,10 +417,21 @@ def main(argv: list[str] | None = None) -> int:
             print("--ensemble needs at least one provider:model member", file=sys.stderr)
             return 2
 
+    # Validate custom-provider args early before any work.
+    if not args.scan_only and not args.evaluate:
+        err = _validate_custom_args(args)
+        if err:
+            print(err, file=sys.stderr)
+            return 2
+
     # --local-only gates cloud providers for the triage pipeline (including
     # every ensemble member).
     if not args.scan_only and args.local_only:
-        err = _check_local_only(args.provider, ensemble=ensemble_members or None)
+        err = _check_local_only(
+            args.provider,
+            ensemble=ensemble_members or None,
+            custom_is_local=bool(args.local),
+        )
         if err:
             print(err, file=sys.stderr)
             return 2
@@ -396,6 +468,9 @@ def main(argv: list[str] | None = None) -> int:
         args.provider,
         args.model,
         reasoning_effort=args.reasoning_effort,
+        base_url=args.base_url,
+        api_key=args.api_key,
+        local=args.local,
     )
     # Ensemble scoring clients: the primary is first, then the extras.
     scoring_clients = None

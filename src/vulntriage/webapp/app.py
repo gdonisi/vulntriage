@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ..llm import LOCAL_PROVIDERS, is_local_provider, list_models
+from ..llm import LOCAL_PROVIDERS, PROVIDER_LABELS, is_local_provider, list_models
 from . import runs as runs_mod
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -45,6 +45,7 @@ PROVIDERS = [
     "anthropic",
     "google",
     "deepseek",
+    "custom",
 ]
 
 
@@ -92,9 +93,14 @@ def _render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
 
 def _providers_for_view(local_only: bool) -> list[dict[str, Any]]:
     return [
-        {"name": p, "local": is_local_provider(p)}
+        {
+            "name": p,
+            "label": PROVIDER_LABELS.get(p, p),
+            "local": is_local_provider(p),
+        }
         for p in PROVIDERS
-        if (not local_only or is_local_provider(p))
+        # Custom is always visible; for others, filter by local_only.
+        if p == "custom" or (not local_only or is_local_provider(p))
     ]
 
 
@@ -158,17 +164,24 @@ def run_new_form(request: Request) -> HTMLResponse:
 
 
 @app.get("/models", response_class=JSONResponse)
-def models_for_provider(provider: str) -> JSONResponse:
+def models_for_provider(
+    provider: str,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> JSONResponse:
     """Best-effort enumeration of a provider's models for the model picker.
 
     Returns ``{"models": [...], "error": null}``. If the provider is unknown,
     auth is missing, or the endpoint is unreachable, ``models`` is ``[]`` and
     ``error`` carries a short message so the client can fall back to free text.
+
+    For ``custom`` providers, *base_url* and *api_key* are forwarded to
+    ``list_models`` so the model picker reaches the correct endpoint.
     """
-    if provider not in PROVIDERS:
+    if provider not in PROVIDERS and provider != "custom":
         return JSONResponse({"models": [], "error": f"unknown provider: {provider}"})
     try:
-        models = list_models(provider)
+        models = list_models(provider, base_url=base_url, api_key=api_key)
     except Exception as e:  # noqa: BLE001 — best-effort; never block the form
         return JSONResponse({"models": [], "error": str(e)})
     return JSONResponse({"models": models, "error": None})
@@ -190,12 +203,22 @@ async def run_new_submit(
     prompt_strategy: str = Form("few-shot"),
     asset_registry: str = Form(""),
     save_intermediates: bool = Form(False),
+    # Custom provider fields.
+    custom_base_url: str = Form(""),
+    api_key: str = Form(""),
+    custom_local: bool = Form(False),
     # Ensemble (optional): repeated provider/model pairs + a quorum.
     ensemble_provider: list[str] = Form(default_factory=list),  # noqa: B008
     ensemble_model: list[str] = Form(default_factory=list),  # noqa: B008
     quorum: int | None = Form(None),
 ) -> RedirectResponse:
     _validate_provider(provider, local_only)
+
+    # Validate custom provider args before any work.
+    if provider == "custom" and not custom_base_url.strip():
+        raise HTTPException(
+            status_code=400, detail="Base URL is required for custom providers."
+        )
 
     # Validate + normalize the ensemble. The primary (provider, model) is the
     # first ensemble member; the extras are zipped from the repeated fields.
@@ -234,6 +257,9 @@ async def run_new_submit(
             save_intermediates=save_intermediates,
             ensemble=ensemble,
             quorum=quorum,
+            custom_base_url=custom_base_url.strip() or None,
+            api_key=api_key.strip() or None,
+            custom_local=custom_local,
         )
         return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
@@ -269,6 +295,9 @@ async def run_new_submit(
         save_intermediates=save_intermediates,
         ensemble=ensemble,
         quorum=quorum,
+        custom_base_url=custom_base_url.strip() or None,
+        api_key=api_key.strip() or None,
+        custom_local=custom_local,
     )
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
@@ -365,8 +394,15 @@ def eval_new_submit(
     model: str = Form(...),
     repeats: int = Form(3),
     local_only: bool = Form(False),
+    custom_base_url: str = Form(""),
+    api_key: str = Form(""),
+    custom_local: bool = Form(False),
 ) -> RedirectResponse:
     _validate_provider(provider, local_only)
+    if provider == "custom" and not custom_base_url.strip():
+        raise HTTPException(
+            status_code=400, detail="Base URL is required for custom providers."
+        )
     if not Path(input_path).exists():
         raise HTTPException(status_code=400, detail=f"Input dataset not found: {input_path}")
     run_id = runs_mod.start_eval(
@@ -375,6 +411,9 @@ def eval_new_submit(
         model=model,
         repeats=repeats,
         local_only=local_only,
+        custom_base_url=custom_base_url.strip() or None,
+        api_key=api_key.strip() or None,
+        custom_local=custom_local,
     )
     return RedirectResponse(url=f"/eval/{run_id}", status_code=303)
 
@@ -405,14 +444,15 @@ def eval_metrics(run_id: str) -> FileResponse:
 
 
 def _validate_provider(provider: str, local_only: bool) -> None:
-    if provider not in PROVIDERS:
+    if provider not in PROVIDERS and provider != "custom":
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
-    if local_only and not is_local_provider(provider):
+    if local_only and not is_local_provider(provider) and provider != "custom":
         raise HTTPException(
             status_code=400,
             detail=(
                 f"--local-only is set but cloud provider requested: {provider}. "
-                f"Allowed: {', '.join(sorted(LOCAL_PROVIDERS))}."
+                f"Allowed: {', '.join(sorted(LOCAL_PROVIDERS))} "
+                f"(or use --provider custom --local)."
             ),
         )
 

@@ -29,15 +29,40 @@
     <div class="check">
       <input type="checkbox" id="local_only" name="local_only" value="1"
              onchange="VulnTriage.onLocalOnlyToggle(this.checked)">
-      <label for="local_only">Local only — restrict to {{ local_providers|join(', ') }}</label>
+      <label for="local_only">Local only: block cloud providers for data privacy and security</label>
     </div>
   </div>
 
   <div class="row">
     <label>Provider <span class="req">*</span></label>
-    <select name="provider" required onchange="VulnTriage.refreshModels(this)">
-      {% for p in providers %}<option value="{{ p.name }}" data-local="{{ '1' if p.local else '' }}">{{ p.name }}{% if p.local %} (local){% endif %}</option>{% endfor %}
+    <select name="provider" required onchange="VulnTriage.onProviderChange(this)">
+      {% for p in providers %}
+        {% set is_custom = p.name == 'custom' %}
+        <option value="{{ p.name }}" data-local="{{ '1' if p.local or is_custom else '' }}">
+          {{- p.label -}}
+        </option>
+      {% endfor %}
     </select>
+  </div>
+
+  {# Custom provider fields — shown only when provider="custom". #}
+  <div id="custom-provider-fields" style="display:none;">
+    <div class="row">
+      <label>Base URL <span class="req">*</span></label>
+      <input type="text" name="custom_base_url" placeholder="http://localhost:8080/v1">
+      <div class="hint">The OpenAI-compatible endpoint URL.</div>
+    </div>
+    <div class="row check">
+      <input type="checkbox" id="custom_local" name="custom_local" value="1">
+      <label for="custom_local">Self-hosted (local) — allows this provider under Local-only mode</label>
+    </div>
+  </div>
+
+  {# API key — always visible, works for all providers. #}
+  <div class="row">
+    <label>API key</label>
+    <input type="text" name="api_key" placeholder="sk-… (optional; overrides env var)">
+    <div class="hint">Omit to use the environment variable for built-in providers, or for keyless local servers.</div>
   </div>
 
   <div class="row">

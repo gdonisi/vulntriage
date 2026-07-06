@@ -64,6 +64,20 @@ uv run python main.py --scan nuclei --target 192.168.1.5 \
 
 # Only run the Nuclei scan, save output and exit
 uv run python main.py --scan nuclei --target 192.168.1.5 --scan-only
+
+# Custom OpenAI-compatible provider (local, no auth)
+uv run python main.py --input data/synthetic_findings.json \
+    --provider custom --base-url http://localhost:8080/v1 --model my-model
+
+# Custom provider with API key + self-hosted flag (so --local-only allows it)
+uv run python main.py --input data/synthetic_findings.json \
+    --provider custom --base-url http://localhost:11434/v1 \
+    --model llama3.1:8b --api-key ollama --local --local-only
+
+# Custom cloud provider (no --local) — blocked by --local-only
+uv run python main.py --input data/synthetic_findings.json \
+    --provider custom --base-url https://api.my-llm.com/v1 \
+    --api-key sk-... --model gpt-4o
 ```
 
 ## Output layout
@@ -166,7 +180,7 @@ Scanner output (Nmap XML / Nuclei JSONL / synthetic JSON)
 | Report Composer | `src/vulntriage/report_composer.py` | `List[RemediatedFinding]` -> HTML + PDF |
 | Plain-text Reporter | `src/vulntriage/reporter.py` | `List[PrioritizedFinding]` -> text report |
 | Eval harness | `src/vulntriage/evaluation.py` | dataset + ground truth -> metrics JSON/CSV |
-| LLM client | `src/vulntriage/llm.py` | OpenAI-compatible (LM Studio / Ollama / OpenRouter / OpenAI / …); `--local-only` gates cloud providers |
+| LLM client | `src/vulntriage/llm.py` | OpenAI-compatible (LM Studio / Ollama / OpenRouter / OpenAI / custom / …); `--provider custom --base-url <url>` for arbitrary endpoints; `--local-only` gates cloud providers |
 
 ## Risk score formula
 

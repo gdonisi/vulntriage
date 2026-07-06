@@ -34,7 +34,7 @@ def _make_client_factory():
         "b": "Medium",
     }
 
-    def _make(provider, model, reasoning_effort=None):
+    def _make(provider, model, reasoning_effort=None, **kwargs):
         return _Client(model, registry.get(model, "Medium"))
 
     return _make

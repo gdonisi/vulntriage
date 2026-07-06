@@ -272,6 +272,9 @@ def compute_metrics(result: RunResult, ground_truth: dict[str, dict]) -> dict:
 class ModelSpec:
     provider: str
     model: str
+    base_url: str | None = None
+    api_key: str | None = None
+    local: bool = False
 
 
 @dataclass
@@ -330,7 +333,13 @@ def run_experiment(config: ExperimentConfig) -> dict:
                 run_metrics: dict[str, list[float]] = {k: [] for k in metric_keys}
                 for rep in range(1, config.repeats + 1):
                     print(f"[eval]   run {rep}/{config.repeats}")
-                    client = make_client(model_spec.provider, model_spec.model)
+                    client = make_client(
+                        model_spec.provider,
+                        model_spec.model,
+                        base_url=model_spec.base_url,
+                        api_key=model_spec.api_key,
+                        local=model_spec.local,
+                    )
                     few_shot = strategy == "few-shot"
                     result = run_once(
                         config.input_path,

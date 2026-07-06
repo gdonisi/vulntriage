@@ -68,13 +68,19 @@ to High/Medium/Low) untouched.
 - `complete(system: str, user: str) -> str`
 
 **`OpenAICompatibleClient`** is the real implementation. It wraps the OpenAI
-SDK and supports nine providers via `make_client()` factory:
+SDK and supports nine built-in providers plus a `custom` provider via
+`make_client()` factory:
 - `lmstudio` — local, base URL `http://localhost:1234/v1`
 - `ollama` — local, `http://localhost:11434/v1`
 - `llamacpp` / `vllm` — local alternatives
 - `openai` — cloud, requires `OPENAI_API_KEY`
 - `openrouter` — cloud, requires `OPENROUTER_API_KEY`
-- `anthropic` / `google` / `deepseek`— cloud alternatives, API key required
+- `anthropic` / `google` / `deepseek` — cloud alternatives, API key required
+- `custom` — arbitrary OpenAI-compatible endpoint; `--base-url` is required,
+  `--api-key` is optional, `--local` marks it as self-hosted for
+  `--local-only` gating. The webapp shows inline fields (base URL, API key,
+  local checkbox) when `custom` is selected, and the model picker fetches
+  from the custom endpoint's own `/models` route.
 
 Each provider can be configured with `--reasoning-effort low|medium|high` for
 models that support chain-of-thought reasoning; provider support varies and
@@ -86,10 +92,12 @@ providers, `False` for cloud). It is not part of the request path; the CLI
 (`lmstudio`/`ollama`/`llamacpp`/`vllm`) to refuse cloud providers before any
 network call is made.
 
-**Provider configuration** is centralized in `_provider_config(provider)`
+**Provider configuration** is centralized in `_provider_config(provider, *, base_url, api_key, local)`
 returning `(base_url, api_key, local)`; both `make_client` (chat completions)
 and `list_models` (model enumeration) route through it so they never disagree
-about the base URL or auth.
+about the base URL or auth. For `custom` providers the three keyword arguments come
+directly from the CLI flags (`--base-url`, `--api-key`, `--local`); for built-in
+providers they are ignored and the hardcoded defaults are used.
 
 **Model enumeration** (`list_models(provider) -> list[str]`) queries each
 provider's OpenAI-compatible `GET /models` endpoint
@@ -356,7 +364,10 @@ Single entry point via `main.py`. Command-line flags:
 | `--input` | v1 | One or more scanner output files (XML/JSONL/JSON); findings are merged |
 | `--scan` | v1 | Run dockerized Nuclei scanner, then continue to triage (unless `--scan-only`) |
 | `--target` | v1 | Target for `--scan` |
-| `--provider` | v1 | LLM provider (lmstudio/ollama/openai/openrouter/…) |
+| `--provider` | v1 | LLM provider (lmstudio/ollama/openai/openrouter/…/custom) |
+| `--base-url` | v3 | Required when `--provider custom`: the OpenAI-compatible endpoint URL |
+| `--api-key` | v3 | Optional API key for custom providers |
+| `--local` | v3 | Marks a custom provider as self-hosted (for `--local-only` gating) |
 | `--model` | v1 | Model name |
 | `--reasoning-effort` | v1 | Thinking/reasoning effort for models that support it (provider support varies) |
 | `--local-only` | v2 | Block cloud providers; only local backends allowed (lmstudio/ollama/llamacpp/vllm) |
@@ -428,7 +439,8 @@ The `output/` tree is tracked in git; `.gitkeep` files keep
 
 ## 13. Tests
 
-82 tests across 11 test files:
+82 tests across 11 test files (pre-custom-provider). After adding custom
+provider support, the suite grew to 93 tests across the same 11 files:
 
 | File | Tests | What it covers |
 |---|---|---|
@@ -437,7 +449,7 @@ The `output/` tree is tracked in git; `.gitkeep` files keep
 | `test_scorer_fewshot.py` | 4 | Few-shot/zero-shot response parsing, fallback label coercion |
 | `test_evaluation.py` | 16 | Ground truth mapping, metric computation, Spearman, CVSS-only baseline, manual time estimate, full experiment grid |
 | `test_pipeline_integration.py` | 2 | End-to-end pipeline (parse→enrich→score→prioritize→remediate→compose) with mock client, zero-shot+no-rag variant |
-| `test_cli.py` | 15 | Help text, text/HTML/PDF/both reports, HTML without `--remediate`, zero-shot+no-rag, save-intermediates (explicit + default path), multi-input merge, `--local-only` (triage + eval), timestamped run dirs, eval timestamped output, evaluate single-model, error handling |
+| `test_cli.py` | 26 | Help text, text/HTML/PDF/both reports, HTML without `--remediate`, zero-shot+no-rag, save-intermediates (explicit + default path), multi-input merge, `--local-only` (triage + eval), timestamped run dirs, eval timestamped output, evaluate single-model, error handling, custom provider validation (11 dedicated tests) |
 | `test_pipeline.py` | 6 | Extracted `run_pipeline()`: HTML+PDF render, text-to-stdout, default intermediates dir, explicit intermediates dir, remediation on/off |
 | `test_webapp.py` | 7 | Dashboard/forms render, new-run (sample + uploads) reaches `done`, stamp + Download PDF present, `--local-only` blocks cloud in the webapp, eval list |
 | `test_scorer_ensemble.py` | 8 | Strict-majority merge (quorum met / not / even-N unanimity / explicit quorum), single-client path unchanged, ensemble resolve + Unresolved splits |
@@ -486,7 +498,7 @@ project/
 ├── src/vulntriage/
 │   ├── __init__.py                  # Exports all models
 │   ├── models.py                    # Pydantic data models (v1 + RemediatedFinding v2)
-│   ├── llm.py                       # LLM client abstraction (v1; total_tokens v2; _provider_config + list_models v3)
+│   ├── llm.py                       # LLM client abstraction (v1; total_tokens v2; _provider_config + list_models + custom provider v3)
 │   ├── parser.py                    # Scanner input parsers (v1)
 │   ├── scanner.py                   # Dockerized Nuclei runner (v1)
 │   ├── enricher.py                  # Context enrichment (v1)
@@ -543,13 +555,24 @@ implemented; the web frontend remains future work.
 
 **Implemented in this iteration:**
 
+- **Custom OpenAI-compatible provider** — `--provider custom --base-url <url>
+  [--api-key <key>] [--local]` lets the pipeline target any
+  OpenAI-compatible endpoint (local servers, proxies, niche cloud APIs)
+  without a new entry in `_provider_config`. The `--local` flag gates it
+  under `--local-only`; `--base-url` is mandatory. The webapp shows inline
+  fields (base URL, API key, local checkbox) when `custom` is selected from
+  the provider dropdown, and the model picker fetches from the custom
+  endpoint's own `/models` route. 11 dedicated CLI tests cover every
+  validation path.
+
 - **Multiple scanner inputs at once** — `--input` accepts one or more files
   (XML/JSONL/JSON); findings are merged across all of them before triage.
 - **`--local-only` mode** — the `LLMClient` carries a `local` flag
   (`True` for self-hosted providers); the CLI `--local-only` flag uses
-  `LOCAL_PROVIDERS` (`lmstudio`/`ollama`/`llamacpp`/`vllm`) to refuse cloud
-  providers before any network call, in both triage and `--evaluate` modes
-  (and across every `--ensemble` member).
+  `LOCAL_PROVIDERS` (`lmstudio`/`ollama`/`llamacpp`/`vllm`) plus
+  `--provider custom --local` to refuse cloud providers before any network
+  call, in both triage and `--evaluate` modes (and across every `--ensemble`
+  member).
 - **Scan → triage in one command** — `--scan nuclei --target … --provider …
   --model …` runs the dockerized Nuclei scan and continues straight into
   triage; `--scan-only` skips triage.

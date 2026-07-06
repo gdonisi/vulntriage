@@ -3,9 +3,14 @@ window.VulnTriage = (function () {
   // One datalist is shared by the primary row and every ensemble row.
   function datalist() { return document.getElementById("models-dl"); }
 
-  async function fetchModels(provider) {
+  async function fetchModels(provider, customBaseUrl, apiKey) {
+    let url = `/models?provider=${encodeURIComponent(provider)}`;
+    if (provider === "custom" && customBaseUrl) {
+      url += `&base_url=${encodeURIComponent(customBaseUrl)}`;
+      if (apiKey) url += `&api_key=${encodeURIComponent(apiKey)}`;
+    }
     try {
-      const r = await fetch(`/models?provider=${encodeURIComponent(provider)}`, { cache: "no-store" });
+      const r = await fetch(url, { cache: "no-store" });
       const j = await r.json();
       return Array.isArray(j.models) ? j.models : [];
     } catch (e) { return []; }
@@ -24,7 +29,22 @@ window.VulnTriage = (function () {
 
   async function refreshModels(selectEl) {
     if (!selectEl) return;
-    setOptions(await fetchModels(selectEl.value));
+    let baseUrl = "", apiKey = "";
+    if (selectEl.value === "custom") {
+      const b = document.querySelector("input[name=custom_base_url]");
+      const k = document.querySelector("input[name=api_key]");
+      baseUrl = b ? b.value : "";
+      apiKey = k ? k.value : "";
+    }
+    setOptions(await fetchModels(selectEl.value, baseUrl, apiKey));
+  }
+
+  function onProviderChange(selectEl) {
+    const customFields = document.getElementById("custom-provider-fields");
+    if (customFields) {
+      customFields.style.display = selectEl.value === "custom" ? "" : "none";
+    }
+    refreshModels(selectEl);
   }
 
   function onLocalOnlyToggle(checked) {
@@ -77,7 +97,7 @@ window.VulnTriage = (function () {
     const rm = document.createElement("button");
     rm.type = "button";
     rm.className = "btn ghost";
-    rm.textContent = "remove";
+    rm.textContent = "- remove";
     rm.style.marginLeft = "8px";
     rm.addEventListener("click", () => { row.remove(); });
     mRow.appendChild(mInput);
@@ -106,6 +126,7 @@ window.VulnTriage = (function () {
     onLocalOnlyToggle,
     addEnsembleRow,
     onEnsembleToggle,
+    onProviderChange,
   };
 })();
 

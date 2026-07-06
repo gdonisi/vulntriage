@@ -169,7 +169,9 @@ class _DummyClient:
 def test_run_experiment_mini(tmp_path, monkeypatch):
     import vulntriage.evaluation as ev
 
-    monkeypatch.setattr(ev, "make_client", lambda p, m, reasoning_effort=None: _DummyClient(m))
+    monkeypatch.setattr(
+        ev, "make_client", lambda p, m, reasoning_effort=None, **kw: _DummyClient(m)
+    )
     monkeypatch.setattr(ev, "run_once", _fake_run_once)
 
     cfg = ExperimentConfig(

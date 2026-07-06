@@ -148,6 +148,9 @@ def start_triage(
     save_intermediates: bool,
     ensemble: list[tuple[str, str]] | None = None,
     quorum: int | None = None,
+    custom_base_url: str | None = None,
+    api_key: str | None = None,
+    custom_local: bool = False,
 ) -> str:
     """Create a run record, spawn the worker, and return the run id."""
     from datetime import datetime
@@ -168,6 +171,9 @@ def start_triage(
         "prompt_strategy": prompt_strategy,
         "asset_registry": asset_registry,
         "save_intermediates": save_intermediates,
+        "custom_base_url": custom_base_url,
+        "api_key": api_key,
+        "custom_local": custom_local,
     }
     if ensemble:
         params["ensemble"] = [{"provider": p, "model": m} for p, m in ensemble]
@@ -216,7 +222,14 @@ def _triage_worker(record: RunRecord) -> None:
     record.state = RUNNING
     p = record.params
     try:
-        client = make_client(p["provider"], p["model"], reasoning_effort=p["reasoning_effort"])
+        client = make_client(
+            p["provider"],
+            p["model"],
+            reasoning_effort=p["reasoning_effort"],
+            base_url=p.get("custom_base_url"),
+            api_key=p.get("api_key"),
+            local=p.get("custom_local", False),
+        )
         scoring_clients = _build_scoring_clients(record, client)
         findings: list = []
         for ip in p["input_paths"]:
@@ -269,6 +282,9 @@ def start_triage_scan(
     save_intermediates: bool,
     ensemble: list[tuple[str, str]] | None = None,
     quorum: int | None = None,
+    custom_base_url: str | None = None,
+    api_key: str | None = None,
+    custom_local: bool = False,
 ) -> str:
     """Run a nuclei scan against *target*, then continue straight into triage."""
     from datetime import datetime
@@ -295,6 +311,9 @@ def start_triage_scan(
             "prompt_strategy": prompt_strategy,
             "asset_registry": asset_registry,
             "save_intermediates": save_intermediates,
+            "custom_base_url": custom_base_url,
+            "api_key": api_key,
+            "custom_local": custom_local,
         },
     )
     if ensemble:
@@ -323,7 +342,14 @@ def _triage_scan_worker(record: RunRecord) -> None:
                 record.state = DONE
                 record.counts = {"total": 0}
                 return
-            client = make_client(p["provider"], p["model"], reasoning_effort=p["reasoning_effort"])
+            client = make_client(
+                p["provider"],
+                p["model"],
+                reasoning_effort=p["reasoning_effort"],
+                base_url=p.get("custom_base_url"),
+                api_key=p.get("api_key"),
+                local=p.get("custom_local", False),
+            )
             scoring_clients = _build_scoring_clients(record, client)
             result = run_pipeline(
                 findings,
@@ -360,6 +386,9 @@ def start_eval(
     model: str,
     repeats: int,
     local_only: bool,
+    custom_base_url: str | None = None,
+    api_key: str | None = None,
+    custom_local: bool = False,
 ) -> str:
     from datetime import datetime
 
@@ -379,6 +408,9 @@ def start_eval(
             "model": model,
             "repeats": repeats,
             "local_only": local_only,
+            "custom_base_url": custom_base_url,
+            "api_key": api_key,
+            "custom_local": custom_local,
         },
         metrics_path=run_dir / "metrics.json",
     )
@@ -396,7 +428,15 @@ def _eval_worker(record: RunRecord) -> None:
 
         config = ExperimentConfig(
             input_path=p["input_path"],
-            models=[ModelSpec(p["provider"], p["model"])],
+            models=[
+                ModelSpec(
+                    p["provider"],
+                    p["model"],
+                    base_url=p.get("custom_base_url"),
+                    api_key=p.get("api_key"),
+                    local=p.get("custom_local", False),
+                )
+            ],
             prompt_strategies=["few-shot", "zero-shot"],
             rag_conditions=[True, False],
             repeats=p["repeats"],
