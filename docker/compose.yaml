@@ -1,0 +1,30 @@
+# ── Vulntriage webapp – Docker Compose ───────────────────────────────────
+# Requires vuln-net to exist (created by vuln-lab compose or manually).
+#
+#   docker network create -d bridge vuln-net      # first time only
+#   docker compose -f docker/compose.yaml build
+#   docker compose -f docker/compose.yaml up
+#
+# Then open http://127.0.0.1:9000
+
+name: vulntriage
+
+services:
+  webapp:
+    image: vulntriage:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - ../output:/app/output
+    networks:
+      - default
+      - vuln-net
+    command: ["--web"]
+    restart: unless-stopped
+
+networks:
+  vuln-net:
+    external: true

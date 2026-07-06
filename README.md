@@ -86,6 +86,35 @@ uv run python main.py --input data/synthetic_findings.json \
     --api-key sk-... --model gpt-4o
 ```
 
+## Docker quickstart
+
+The vulntriage Docker image ships with nuclei pre-installed — no separate
+nuclei container needed.
+
+```bash
+# Build the image
+docker build -f docker/Dockerfile -t vulntriage .
+
+# Create the Docker network (shared with vuln-lab targets)
+docker network create -d bridge vuln-net
+
+# One-shot CLI: scan a target on vuln-net, triage, write reports
+docker run --network vuln-net -v ./output:/app/output vulntriage \
+    --scan nuclei --target dvwa \
+    --provider lmstudio --model qwen3.5-4b \
+    --output-format both --remediate
+
+# Webapp: persistent dashboard at http://127.0.0.1:9000
+docker compose -f docker/compose.yaml up --build
+
+# Webapp + vulnerable targets together (start vuln-lab first)
+docker compose -f docker/vuln-lab/compose.yaml up -d
+docker compose -f docker/compose.yaml up -d
+```
+
+When running on the host without Docker (no nuclei on `$PATH`), the scanner
+falls back to ``docker run my-nuclei`` automatically.
+
 ## Output layout
 
 Each triage run writes to its own timestamped directory so previous results

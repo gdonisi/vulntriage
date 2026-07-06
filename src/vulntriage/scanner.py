@@ -13,11 +13,17 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
 _DOCKER_NETWORK = "vuln-net"
+
+
+def _nuclei_binary() -> str | None:
+    """Return the path to the nuclei binary, or ``None`` if not found."""
+    return shutil.which("nuclei")
 
 
 class _DockerResolveResult(NamedTuple):
@@ -111,26 +117,76 @@ def run_nuclei(
     templates: str | None = None,
     extra_args: list[str] | None = None,
 ) -> Path:
-    """Run the dockerized Nuclei image against one or more targets.
+    """Run Nuclei against one or more targets.
 
-    Hostnames that look like bare Docker container names (no dots, no
-    scheme, not an IP) are automatically resolved to their container IP
-    via ``docker inspect`` so that nuclei's httpx can reach them.
+    When the ``nuclei`` binary is available on ``$PATH`` (e.g. inside the
+    Docker image) it is invoked directly.  Otherwise the function falls back
+    to a ``docker run`` call against *image* — hostnames that look like bare
+    Docker container names are automatically resolved to their container IP
+    via ``docker inspect`` so that nuclei's httpx can reach them inside the
+    ``vuln-net`` Docker network.
 
     Args:
         targets: A single host/URL or a list of them.
         output_path: Where to write the JSONL results.
-        image: Docker image tag (build with: docker build -t my-nuclei:latest docker/nuclei).
+        image: Docker image tag (used only in the Docker fallback path).
         templates: Optional Nuclei template tag/path filter.
         extra_args: Extra flags forwarded to the nuclei binary.
 
     Returns:
         The Path to the written JSONL file.
     """
-    target_list = _resolve_targets(targets)
-
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    binary = _nuclei_binary()
+    if binary is not None:
+        return _run_nuclei_binary(binary, targets, out, templates, extra_args)
+    return _run_nuclei_docker(targets, out, image, templates, extra_args)
+
+
+def _run_nuclei_binary(
+    binary: str,
+    targets: str | list[str],
+    out: Path,
+    templates: str | None,
+    extra_args: list[str] | None,
+) -> Path:
+    """Run the nuclei binary directly (no Docker)."""
+    target_list = targets if isinstance(targets, str) else ",".join(targets)
+    cmd = [
+        binary,
+        "-u",
+        target_list,
+        "-jsonl",
+        "-o",
+        str(out),
+    ]
+    if templates:
+        cmd.extend(["-t", templates])
+    if extra_args:
+        cmd.extend(extra_args)
+
+    print(f"[scanner] running nuclei (binary): {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        msg = f"nuclei failed (exit {result.returncode}):\n{result.stderr}"
+        raise RuntimeError(msg)
+    if not out.exists():
+        out.write_text("")
+    print(f"[scanner] wrote {out}")
+    return out
+
+
+def _run_nuclei_docker(
+    targets: str | list[str],
+    out: Path,
+    image: str,
+    templates: str | None,
+    extra_args: list[str] | None,
+) -> Path:
+    """Run nuclei inside a Docker container (host fallback)."""
+    target_list = _resolve_targets(targets)
 
     cmd = [
         "docker",
@@ -151,7 +207,7 @@ def run_nuclei(
     if extra_args:
         cmd.extend(extra_args)
 
-    print(f"[scanner] running nuclei: {' '.join(cmd)}")
+    print(f"[scanner] running nuclei (docker): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         msg = f"nuclei failed (exit {result.returncode}):\n{result.stderr}"

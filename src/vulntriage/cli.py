@@ -376,7 +376,7 @@ def _run_web(args: argparse.Namespace) -> int:
 
     uvicorn.run(
         "vulntriage.webapp.app:app",
-        host="127.0.0.1",
+        host="0.0.0.0",
         port=9000,
         reload=False,
         log_level="info",

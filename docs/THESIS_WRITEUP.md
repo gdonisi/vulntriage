@@ -485,6 +485,7 @@ project/
 ├── README.md                        # Updated with v2
 ├── todo.txt                         # Tracked future-work items
 ├── .gitignore
+├── .dockerignore
 ├── data/
 │   ├── assets.yaml                  # Host→criticality (v1)
 │   ├── synthetic_findings.json      # 20 findings with ground truth (v1 expanded)
@@ -500,7 +501,7 @@ project/
 │   ├── models.py                    # Pydantic data models (v1 + RemediatedFinding v2)
 │   ├── llm.py                       # LLM client abstraction (v1; total_tokens v2; _provider_config + list_models + custom provider v3)
 │   ├── parser.py                    # Scanner input parsers (v1)
-│   ├── scanner.py                   # Dockerized Nuclei runner (v1)
+│   ├── scanner.py                   # Nuclei runner — direct binary or Docker fallback (v1 + Docker v4)
 │   ├── enricher.py                  # Context enrichment (v1)
 │   ├── scorer.py                    # Exploitability scoring (v1, few_shot param v2, ensemble clients/quorum v3)
 │   ├── prioritizer.py               # Risk prioritization (v1)
@@ -542,8 +543,15 @@ project/
 │   ├── eval/<ts>/                  # Per-run eval metrics.json + results.csv (timestamped)
 │   ├── reports/.gitkeep            # (legacy dir retained)
 │   └── eval/.gitkeep
-└── docker/nuclei/
-    └── Dockerfile                   # Nuclei container (v1)
+└── docker/
+    ├── Dockerfile                   # Vulntriage image (v4, new)
+    ├── compose.yaml                 # Vulntriage webapp (v4, new)
+    ├── nuclei/
+    │   └── Dockerfile               # Nuclei container (v1)
+    ├── vuln-lab/
+    │   └── compose.yaml             # Vulnerable targets
+    └── openvas/
+        └── compose.yaml             # Greenbone/OpenVAS
 ```
 
 ---
@@ -715,3 +723,94 @@ Type: *Spectral* (display serif), *IBM Plex Sans* (body), *JetBrains Mono*
 `oxblood #7A2F26`, `ochre #9A6B1A`, `sage #5C6E4B`, `hairline #C5BEAD`.
 Everything else is disciplined: hairline rules, ~no radii, no shadows, no
 gradients; severity colour comes only from the data.
+
+---
+
+## 18. Docker Support
+
+The full pipeline (CLI + webapp) ships as a single Docker image with Nuclei
+pre-installed as a native Linux binary — no separate Nuclei container, no
+Docker socket mount, no Docker-in-Docker.
+
+### 18.1 Motivation
+
+The original scanner module (`scanner.py`) ran Nuclei exclusively through
+``docker run`` against a local image built from `docker/nuclei/Dockerfile`.
+Dockerizing the pipeline itself would have required either Docker-in-Docker
+(privileged mode, not recommended) or mounting the host Docker socket
+(Docker-outside-of-Docker, which introduces volume-path mapping issues and
+socket permission headaches).
+
+The chosen approach sidesteps both: the vulntriage image bundles the Nuclei
+binary directly, copied from the official `projectdiscovery/nuclei:v3` image
+via a multi-stage build, with templates pre-downloaded at build time
+(`nuclei -ut`). When the image runs attached to ``vuln-net`` (the same
+external Docker network used by the vulnerable-lab targets), Docker's
+embedded DNS resolves container names like ``dvwa`` natively — no manual
+hostname-to-IP resolution is needed.
+
+### 18.2 Binary detection in `scanner.py`
+
+`run_nuclei()` checks ``shutil.which("nuclei")`` at runtime:
+
+- **Binary found** → ``subprocess.run(["nuclei", "-u", target_list, ...])`` is
+  called directly. No Docker networking flags, no volume mounts, no
+  ``docker inspect`` hostname resolution — DNS works natively on `vuln-net`.
+- **Binary not found** → the existing ``docker run my-nuclei`` fallback is
+  used unchanged, preserving the original host-based workflow.
+
+This means the same code works both inside the Docker image (where nuclei is
+on ``$PATH``) and on a developer host with only the nuclei Docker image
+available.
+
+### 18.3 Image structure
+
+The Dockerfile (`docker/Dockerfile`) uses three build stages:
+
+| Stage | Source | Purpose |
+|---|---|---|
+| `nuclei-src` | `projectdiscovery/nuclei:v3` | Nuclei binary |
+| `uv-bin` | `ghcr.io/astral-sh/uv:latest` | uv package manager |
+| runtime | `python:3.14-slim` | Final image |
+
+System dependencies for WeasyPrint (PDF rendering) are installed via `apt`.
+Application dependencies are installed with ``uv sync --frozen --no-dev``;
+the entrypoint is ``uv run python main.py`` with ``--help`` as the default
+command.
+
+### 18.4 Usage
+
+**One-shot CLI scan + triage:**
+```bash
+docker build -f docker/Dockerfile -t vulntriage .
+docker network create -d bridge vuln-net  # first time only
+docker run --network vuln-net -v ./output:/app/output vulntriage \
+    --scan nuclei --target dvwa \
+    --provider lmstudio --model qwen3.5-4b \
+    --output-format both --remediate
+```
+
+**Persistent webapp + targets:**
+```bash
+docker compose -f docker/vuln-lab/compose.yaml up -d  # targets
+docker compose -f docker/compose.yaml up --build       # webapp on :9000
+```
+
+The compose file (`docker/compose.yaml`) attaches the webapp to the external
+`vuln-net` network and bind-mounts `./output` so reports survive container
+recreation. The webapp writes to the same `output/runs/<ts>/` layout as the
+CLI, and a ``docker compose down`` + ``up`` recovers interrupted runs from
+disk.
+
+### 18.5 Files
+
+| File | Purpose |
+|---|---|
+| `docker/Dockerfile` | Multi-stage vulntriage image |
+| `docker/compose.yaml` | Webapp service + network wiring |
+| `.dockerignore` | Excludes venv, git, caches, tests from build context |
+| `src/vulntriage/scanner.py` | Updated with binary detection + fallback |
+
+The existing `docker/nuclei/Dockerfile` (standalone nuclei container) is
+preserved — it remains the fallback used when running on a host without a
+local nuclei installation.
