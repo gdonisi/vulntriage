@@ -4,10 +4,12 @@ Supported formats:
   - Nmap XML       (.xml)
   - Nuclei JSONL   (.jsonl)
   - Synthetic JSON (.json) — our own schema for test data
+  - OpenVAS CSV    (.csv)  — Greenbone OpenVAS exported results
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import uuid
 import xml.etree.ElementTree as ET
@@ -26,6 +28,8 @@ def parse(path: str | Path) -> list[RawFinding]:
         return _parse_nuclei(p)
     if suffix == ".json":
         return _parse_synthetic(p)
+    if suffix == ".csv":
+        return _parse_openvas(p)
     msg = f"Unsupported input format {suffix!r} for {p}"
     raise ValueError(msg)
 
@@ -106,6 +110,86 @@ def _parse_nuclei(path: Path) -> list[RawFinding]:
                     cvss=float(cvss) if cvss else None,
                     cve=cve_id,
                     raw=record,
+                )
+            )
+    return findings
+
+
+def _parse_openvas(path: Path) -> list[RawFinding]:
+    """Parse a Greenbone OpenVAS CSV export into RawFindings.
+
+    Expected columns (from the GSA CSV export dialog):
+      IP, Hostname, Port, Port Protocol, CVSS, Severity, Solution Type,
+      NVT Name, Summary, Specific Result, NVT OID, CVEs, Task ID,
+      Task Name, Timestamp, Result ID, Impact, Solution,
+      Affected Software/OS, Vulnerability Insight, Vulnerability Detection Method,
+      Product Detection Result, BIDs, CERTs, Other References
+    """
+    findings: list[RawFinding] = []
+    # The CSV may carry a BOM; utf-8-sig handles it transparently.
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            ip = row.get("IP") or "unknown"
+            port_str = (row.get("Port") or "").strip()
+            port = int(port_str) if port_str else None
+
+            # Derive a service label from the affected software / product detection,
+            # falling back to the port protocol.
+            service = (
+                row.get("Affected Software/OS")
+                or row.get("Product Detection Result")
+                or row.get("Port Protocol")
+                or None
+            )
+
+            # Build a human-readable description from the most informative columns.
+            nvt_name = row.get("NVT Name") or ""
+            summary = row.get("Summary") or ""
+            specific_result = row.get("Specific Result") or ""
+            desc_parts: list[str] = []
+            if nvt_name:
+                desc_parts.append(nvt_name)
+            if summary:
+                desc_parts.append(summary)
+            if specific_result:
+                desc_parts.append(f"Result: {specific_result}")
+            description = " — ".join(desc_parts) if desc_parts else "OpenVAS finding"
+
+            # CVSS
+            cvss_raw = (row.get("CVSS") or "").strip()
+            cvss: float | None = None
+            if cvss_raw:
+                try:
+                    cvss = float(cvss_raw)
+                except ValueError:
+                    pass
+
+            # CVE — semicolon-separated list; take the first one.
+            cves_raw = (row.get("CVEs") or "").strip()
+            cve: str | None = None
+            if cves_raw:
+                cve = cves_raw.split(";", 1)[0].strip() or None
+
+            # Unique identifier: OID + Result ID.
+            oid = (row.get("NVT OID") or "").strip()
+            result_id = (row.get("Result ID") or "").strip()
+            if oid and result_id:
+                finding_id = f"openvas-{oid}-{result_id}"
+            else:
+                finding_id = f"openvas-{uuid.uuid4().hex[:8]}"
+
+            findings.append(
+                RawFinding(
+                    id=finding_id,
+                    source="openvas",
+                    host=ip,
+                    port=port,
+                    service=service,
+                    description=description,
+                    cvss=cvss,
+                    cve=cve,
+                    raw=dict(row),
                 )
             )
     return findings

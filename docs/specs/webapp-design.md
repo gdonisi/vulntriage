@@ -219,7 +219,7 @@ disables the only animation (the stamp "lands" with a 200ms scale-in on done).
 9. **Lint/format**: `ruff check --fix`, `ruff format`.
 10. **Docs**: README "Web interface" section (`uv run uvicorn vulntriage.webapp.app:app --reload`),
     THESIS_WRITEUP new §17 "Web Interface" describing routes, run model,
-    and the Case File design; todo.txt strike-through the webapp item.
+    and the Case File design.
 11. **Run it**: a manual smoke `uv run uvicorn vulntriage.webapp.app:app`
     against the sample dataset with a mock client (or a local model) to
     eyeball the dossier + stamp + iframe report.
@@ -236,7 +236,6 @@ tests/test_webapp.py                  # NEW
 README.md                             # + Web interface section
 docs/specs/webapp-design.md           # THIS
 docs/THESIS_WRITEUP.md                # + §17 Web Interface
-todo.txt                              # + DONE: webapp
 ```
 
 ## Validation

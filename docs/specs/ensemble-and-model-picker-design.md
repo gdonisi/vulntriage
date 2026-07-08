@@ -352,7 +352,7 @@ mismatched-length rejection, and the local-only-above-provider form
 assertion). The single-model paths are covered by the pre-existing tests,
 which stayed unchanged.
 16. **Lint/format** — `ruff check --fix`, `ruff format`.
-17. **Docs** — this design doc; README CLI examples; strike through the three `todo.txt` items.
+17. **Docs** — this design doc; README CLI examples;
 
 ## Files / Areas Likely Affected
 
@@ -376,7 +376,6 @@ tests/
   test_scorer_ensemble.py        # NEW: ensemble merge + Unresolved (different-label mocks)
   test_cli_ensemble.py           # NEW: --ensemble / --quorum parsing + local-only gating
   test_webapp_models_ensemble.py # NEW: /models route + ensemble POST + local-only-above-provider form assertion
-todo.txt                 # strike-through all three
 README.md                # CLI ensemble example, /models note
 docs/specs/ensemble-and-model-picker-design.md   # THIS
 ```

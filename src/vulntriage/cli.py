@@ -12,15 +12,19 @@ Merge findings from multiple scanner outputs at once:
     uv run python main.py --input data/sample_nmap.xml data/sample_nuclei.jsonl \
         --provider lmstudio --model qwen3.5-4b --remediate
 
-Run the dockerized Nuclei scanner, then continue straight into triage
+Run the dockerized Nuclei or Nmap scanner, then continue straight into triage
 (--scan-only would stop after the scan):
 
     uv run python main.py --scan nuclei --target 192.168.1.5 \
         --provider lmstudio --model qwen3.5-4b
 
-Only run the Nuclei scan, save output and exit:
+    uv run python main.py --scan nmap --target 192.168.1.0/24 \
+        --provider lmstudio --model qwen3.5-4b
+
+Only run a scan, save output and exit:
 
     uv run python main.py --scan nuclei --target 192.168.1.5 --scan-only
+    uv run python main.py --scan nmap --target 192.168.1.0/24 --scan-only
 
 Use a custom OpenAI-compatible provider (local or cloud):
 
@@ -71,7 +75,7 @@ from .evaluation import (
 from .llm import LOCAL_PROVIDERS, is_local_provider, make_client
 from .parser import parse
 from .pipeline import run_pipeline
-from .scanner import run_nuclei
+from .scanner import run_nmap, run_nuclei
 
 # Sentinel for ``--save-intermediates`` with no explicit path: intermediates
 # are written under ``<run_dir>/intermediates/``.
@@ -91,9 +95,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     src.add_argument(
         "--scan",
-        choices=["nuclei"],
+        choices=["nuclei", "nmap"],
         help="Run a dockerized scanner against --target, then continue to triage "
-        "(unless --scan-only is set)",
+        "(unless --scan-only is set). nmap outputs XML, nuclei outputs JSONL.",
     )
     p.add_argument("--evaluate", action="store_true", help="Run the evaluation experiment grid")
     p.add_argument("--eval-config", help="JSON experiment config for --evaluate (multi-model grid)")
@@ -437,20 +441,34 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     # 1. Acquire scanner results.
+    scan_target: str | None = None
     if args.scan == "nuclei":
         if not args.target:
             print("--scan requires --target", file=sys.stderr)
             return 2
+        scan_target = args.target
         out_path = Path(f"data/nuclei_scan_{int(time.time())}.jsonl")
-        run_nuclei(args.target, out_path)
+        run_nuclei(scan_target, out_path)
         print(f"[pipeline] nuclei scan output saved to {out_path.resolve()}")
+    elif args.scan == "nmap":
+        if not args.target:
+            print("--scan requires --target", file=sys.stderr)
+            return 2
+        scan_target = args.target
+        out_path = Path(f"data/nmap_scan_{int(time.time())}.xml")
+        run_nmap(scan_target, out_path)
+        print(f"[pipeline] nmap scan output saved to {out_path.resolve()}")
+    else:
+        if args.scan_only:
+            print("--scan-only requires --scan nuclei or --scan nmap", file=sys.stderr)
+            return 2
+        input_paths = list(args.input)
+
+    if scan_target:
         if args.scan_only:
             return 0
         input_paths = [str(out_path)]
     else:
-        if args.scan_only:
-            print("--scan-only requires --scan nuclei", file=sys.stderr)
-            return 2
         input_paths = list(args.input)
 
     # 2. Parse (and merge) findings from all inputs.

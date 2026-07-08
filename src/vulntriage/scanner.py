@@ -1,11 +1,12 @@
-"""Dockerized Nuclei scanner runner.
+"""Dockerized scanner runners (Nuclei + Nmap).
 
-Wraps the local Docker image built from docker/nuclei/Dockerfile and captures
-its JSONL output into a file the parser can read.
+Wraps the local Docker images built from docker/nuclei/Dockerfile and
+docker/nmap/Dockerfile, capturing their output into files the parser can read.
 
 Usage:
-    from vulntriage.scanner import run_nuclei
+    from vulntriage.scanner import run_nuclei, run_nmap
     out = run_nuclei(targets="192.168.1.5", output_path="data/scan.jsonl")
+    out = run_nmap(targets="192.168.1.0/24", output_path="data/scan.xml")
     # then parser.parse(out)
 """
 
@@ -214,5 +215,106 @@ def _run_nuclei_docker(
         raise RuntimeError(msg)
     if not out.exists():
         out.write_text("")
+    print(f"[scanner] wrote {out}")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Nmap scanner runner
+# ---------------------------------------------------------------------------
+
+
+def _nmap_binary() -> str | None:
+    """Return the path to the nmap binary, or ``None`` if not found."""
+    return shutil.which("nmap")
+
+
+def run_nmap(
+    targets: str | list[str],
+    output_path: str | Path,
+    image: str = "my-nmap:latest",
+    extra_args: list[str] | None = None,
+) -> Path:
+    """Run Nmap against one or more targets.
+
+    When the ``nmap`` binary is available on ``$PATH`` (e.g. inside the
+    Docker image) it is invoked directly.  Otherwise the function falls back
+    to a ``docker run`` call against *image* — hostnames that look like bare
+    Docker container names are automatically resolved to their container IP
+    via ``docker inspect`` so that nmap can reach them inside the
+    ``vuln-net`` Docker network.
+
+    Args:
+        targets: A single target or a list of them (IPs, CIDR ranges, hostnames).
+        output_path: Where to write the XML results.
+        image: Docker image tag (used only in the Docker fallback path).
+        extra_args: Extra flags forwarded to the nmap binary.
+
+    Returns:
+        The Path to the written XML file.
+    """
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    binary = _nmap_binary()
+    if binary is not None:
+        return _run_nmap_binary(binary, targets, out, extra_args)
+    return _run_nmap_docker(targets, out, image, extra_args)
+
+
+def _run_nmap_binary(
+    binary: str,
+    targets: str | list[str],
+    out: Path,
+    extra_args: list[str] | None,
+) -> Path:
+    """Run the nmap binary directly (no Docker)."""
+    target_list = targets if isinstance(targets, str) else " ".join(targets)
+    cmd = [binary, "-oX", "-", target_list]
+    if extra_args:
+        cmd.extend(extra_args)
+
+    print(f"[scanner] running nmap (binary): {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        msg = f"nmap failed (exit {result.returncode}):\n{result.stderr}"
+        raise RuntimeError(msg)
+    out.write_text(result.stdout)
+    print(f"[scanner] wrote {out}")
+    return out
+
+
+def _run_nmap_docker(
+    targets: str | list[str],
+    out: Path,
+    image: str,
+    extra_args: list[str] | None,
+) -> Path:
+    """Run nmap inside a Docker container (host fallback).
+
+    Nmap XML output is written to stdout via ``-oX -`` and captured here,
+    so no volume mount is needed.
+    """
+    target_list = _resolve_targets(targets)
+
+    cmd = [
+        "docker",
+        "run",
+        f"--network={_DOCKER_NETWORK}",
+        "--rm",
+        image,
+        "-oX",
+        "-",
+        target_list,
+    ]
+    if extra_args:
+        cmd.extend(extra_args)
+
+    print(f"[scanner] running nmap (docker): {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        msg = f"nmap failed (exit {result.returncode}):\n{result.stderr}"
+        raise RuntimeError(msg)
+    out.write_text(result.stdout)
     print(f"[scanner] wrote {out}")
     return out

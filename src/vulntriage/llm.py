@@ -59,7 +59,7 @@ class OpenAICompatibleClient:
     ) -> None:
         self.model = model
         self._reasoning_effort = reasoning_effort
-        # Whether this provider is self-hosted (reserved for --local-only; see todo.txt).
+        # Whether this provider is self-hosted (reserved for --local-only).
         self._local = local
         self._client = OpenAI(base_url=base_url, api_key=api_key or "none")
         # Best-effort running total of tokens consumed across all calls.

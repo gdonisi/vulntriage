@@ -26,7 +26,7 @@ provider-swappable.
 **Data flow (v2 full pipeline)**:
 
 ```
-Scanner output (Nmap XML / Nuclei JSONL / synthetic JSON)
+Scanner output (Nmap XML / Nuclei JSONL / OpenVAS CSV / synthetic JSON)
   → Parser            → List[RawFinding]
   → Context Enricher  (LLM) → List[EnrichedFinding]
   → Exploitability Scorer (LLM) → List[ScoredFinding]
@@ -119,9 +119,10 @@ Auto-detects format from file extension:
 | `.xml` | Nmap XML | `xml.etree.ElementTree` | Iterates `<port>` elements with state="open", extracts service + product + version |
 | `.jsonl` | Nuclei JSONL | Line-by-line `json.loads` | Extracts template-id, name, severity, CVSS score, CVE-ID from the classification block |
 | `.json` | Synthetic | `json.loads` | Reads array of items with our schema (used for test data) |
+| `.csv` | OpenVAS CSV | `csv.DictReader` | Reads GSA CSV export; extracts IP, port, NVT name, summary, CVSS, CVEs, affected software |
 
 All parsers normalize to `list[RawFinding]`. Findings get unique IDs prefixed
-by source (`nmap-…`, `nuclei-…`, `synthetic-…`).
+by source (`nmap-…`, `nuclei-…`, `openvas-…`, `synthetic-…`).
 
 ---
 
@@ -361,8 +362,8 @@ Single entry point via `main.py`. Command-line flags:
 
 | Flag | v1/v2 | Description |
 |---|---|---|
-| `--input` | v1 | One or more scanner output files (XML/JSONL/JSON); findings are merged |
-| `--scan` | v1 | Run dockerized Nuclei scanner, then continue to triage (unless `--scan-only`) |
+| `--input` | v1 | One or more scanner output files (XML/JSONL/JSON/CSV); findings are merged |
+| `--scan` | v1 | Run dockerized scanner (nuclei or nmap), then continue to triage (unless `--scan-only`) |
 | `--target` | v1 | Target for `--scan` |
 | `--provider` | v1 | LLM provider (lmstudio/ollama/openai/openrouter/…/custom) |
 | `--base-url` | v3 | Required when `--provider custom`: the OpenAI-compatible endpoint URL |
@@ -483,7 +484,6 @@ project/
 ├── main.py                          # Entry point → cli.main()
 ├── pyproject.toml                   # Dependencies
 ├── README.md                        # Updated with v2
-├── todo.txt                         # Tracked future-work items
 ├── .gitignore
 ├── .dockerignore
 ├── data/
@@ -495,13 +495,15 @@ project/
 │   │   └── report.html              # Jinja2 HTML report template (v2)
 │   ├── sample_nmap.xml              # Example Nmap input (v1)
 │   ├── sample_nuclei.jsonl          # Example Nuclei input (v1)
-│   └── nuclei_scan_*.jsonl          # Generated scan outputs
+│   ├── openvas_sample.csv           # Example OpenVAS CSV export (v5)
+│   ├── nuclei_scan_*.jsonl          # Generated Nuclei scan outputs
+│   └── nmap_scan_*.xml              # Generated Nmap scan outputs
 ├── src/vulntriage/
 │   ├── __init__.py                  # Exports all models
 │   ├── models.py                    # Pydantic data models (v1 + RemediatedFinding v2)
 │   ├── llm.py                       # LLM client abstraction (v1; total_tokens v2; _provider_config + list_models + custom provider v3)
-│   ├── parser.py                    # Scanner input parsers (v1)
-│   ├── scanner.py                   # Nuclei runner — direct binary or Docker fallback (v1 + Docker v4)
+│   ├── parser.py                    # Scanner input parsers (v1 + OpenVAS CSV v5)
+│   ├── scanner.py                   # Nuclei + Nmap runners — direct binary or Docker fallback (v1 + Docker v4 + Nmap v5)
 │   ├── enricher.py                  # Context enrichment (v1)
 │   ├── scorer.py                    # Exploitability scoring (v1, few_shot param v2, ensemble clients/quorum v3)
 │   ├── prioritizer.py               # Risk prioritization (v1)
@@ -558,9 +560,6 @@ project/
 
 ## 16. Known Limitations & Future Work
 
-Items originally tracked in `todo.txt`. The CLI/usability items are now
-implemented; the web frontend remains future work.
-
 **Implemented in this iteration:**
 
 - **Custom OpenAI-compatible provider** — `--provider custom --base-url <url>
@@ -582,8 +581,8 @@ implemented; the web frontend remains future work.
   call, in both triage and `--evaluate` modes (and across every `--ensemble`
   member).
 - **Scan → triage in one command** — `--scan nuclei --target … --provider …
-  --model …` runs the dockerized Nuclei scan and continues straight into
-  triage; `--scan-only` skips triage.
+  --model …` (or `--scan nmap --target …`) runs the dockerized scanner and
+  continues straight into triage; `--scan-only` skips triage.
 - **Run outputs no longer overwritten** — triage reports go to
   `output/runs/<ts>/` and eval results to `output/eval/<ts>/` (timestamped);
   `--save-intermediates` (no value) defaults to `<run_dir>/intermediates/`.
@@ -599,9 +598,6 @@ implemented; the web frontend remains future work.
   webapp "Multi-LLM ensemble" toggle run the exploitability scorer against N
   models and merge by strict-majority quorum (default `⌊N/2⌋+1`); findings
   where no label reaches quorum are flagged `Unresolved`. See §6.1.
-
-**Remaining future work:** none tracked in `todo.txt` after this iteration
-(all three original items shipped and struck through).
 
 **Additional limitations relevant to the thesis evaluation:**
 
@@ -736,6 +732,10 @@ Docker socket mount, no Docker-in-Docker.
 
 The original scanner module (`scanner.py`) ran Nuclei exclusively through
 ``docker run`` against a local image built from `docker/nuclei/Dockerfile`.
+Nmap support was added later (v5), following the same pattern: a
+`docker/nmap/Dockerfile` that produces a minimal Alpine-based image, and
+`run_nmap()` mirroring the `run_nuclei()` interface (binary detection +
+Docker fallback).
 Dockerizing the pipeline itself would have required either Docker-in-Docker
 (privileged mode, not recommended) or mounting the host Docker socket
 (Docker-outside-of-Docker, which introduces volume-path mapping issues and
@@ -754,14 +754,16 @@ hostname-to-IP resolution is needed.
 `run_nuclei()` checks ``shutil.which("nuclei")`` at runtime:
 
 - **Binary found** → ``subprocess.run(["nuclei", "-u", target_list, ...])`` is
-  called directly. No Docker networking flags, no volume mounts, no
-  ``docker inspect`` hostname resolution — DNS works natively on `vuln-net`.
-- **Binary not found** → the existing ``docker run my-nuclei`` fallback is
-  used unchanged, preserving the original host-based workflow.
+  called directly (for nmap: ``["nmap", "-oX", "-", target_list]``). No
+  Docker networking flags, no volume mounts, no ``docker inspect`` hostname
+  resolution — DNS works natively on `vuln-net`.
+- **Binary not found** → the existing ``docker run my-nuclei`` (or
+  ``my-nmap``) fallback is used unchanged, preserving the original host-based
+  workflow.
 
-This means the same code works both inside the Docker image (where nuclei is
-on ``$PATH``) and on a developer host with only the nuclei Docker image
-available.
+This means the same code works both inside the Docker image (where nuclei and
+nmap are on ``$PATH``) and on a developer host with only the scanner Docker
+images available.
 
 ### 18.3 Image structure
 
@@ -784,10 +786,15 @@ command.
 ```bash
 docker build -f docker/Dockerfile -t vulntriage .
 docker network create -d bridge vuln-net  # first time only
+# Nuclei scan
 docker run --network vuln-net -v ./output:/app/output vulntriage \
     --scan nuclei --target dvwa \
     --provider lmstudio --model qwen3.5-4b \
     --output-format both --remediate
+# Nmap scan
+docker run --network vuln-net -v ./output:/app/output vulntriage \
+    --scan nmap --target 192.168.1.0/24 \
+    --provider lmstudio --model qwen3.5-4b
 ```
 
 **Persistent webapp + targets:**
@@ -809,8 +816,8 @@ disk.
 | `docker/Dockerfile` | Multi-stage vulntriage image |
 | `docker/compose.yaml` | Webapp service + network wiring |
 | `.dockerignore` | Excludes venv, git, caches, tests from build context |
-| `src/vulntriage/scanner.py` | Updated with binary detection + fallback |
+| `src/vulntriage/scanner.py` | Updated with binary detection + fallback (nuclei + nmap) |
 
-The existing `docker/nuclei/Dockerfile` (standalone nuclei container) is
-preserved — it remains the fallback used when running on a host without a
-local nuclei installation.
+The existing `docker/nuclei/Dockerfile` and `docker/nmap/Dockerfile`
+(standalone scanner containers) are preserved — they remain the fallback used
+when running on a host without a local scanner installation.

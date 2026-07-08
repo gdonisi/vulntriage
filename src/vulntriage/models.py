@@ -29,7 +29,7 @@ class RawFinding(BaseModel):
     """A normalized vulnerability finding straight from a scanner."""
 
     id: str
-    source: str = Field(description="Scanner that produced this finding: nmap|nuclei|synthetic")
+    source: str = Field(description="Scanner that produced this finding: nmap|nuclei|openvas|synthetic")
     host: str
     port: int | None = None
     service: str | None = None
