@@ -20,7 +20,12 @@ _DEFAULT_TEMPLATE_NAME = "report.html"
 _BAR_COLORS = {"High": "#c0392b", "Medium": "#d68910", "Low": "#1e8449"}
 
 
-def _build_context(findings: Sequence[PrioritizedFinding]) -> dict:
+def _build_context(
+    findings: Sequence[PrioritizedFinding],
+    *,
+    provider: str = "",
+    model: str = "",
+) -> dict:
     """Build the Jinja2 context dict from a list of findings.
 
     Accepts ``RemediatedFinding`` (full report) or plain ``PrioritizedFinding``
@@ -109,6 +114,8 @@ def _build_context(findings: Sequence[PrioritizedFinding]) -> dict:
         )
 
     return {
+        "provider": provider or "",
+        "model": model or "",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "summary": {
             "total": len(findings),
@@ -139,11 +146,13 @@ def render_html(
     findings: Sequence[PrioritizedFinding],
     *,
     template_dir: str | Path | None = None,
+    provider: str = "",
+    model: str = "",
 ) -> str:
     """Render findings to an HTML string."""
     env = _make_env(template_dir)
     template = env.get_template(_DEFAULT_TEMPLATE_NAME)
-    return template.render(**_build_context(findings))
+    return template.render(**_build_context(findings, provider=provider, model=model))
 
 
 def write_html(
@@ -151,11 +160,13 @@ def write_html(
     path: str | Path,
     *,
     template_dir: str | Path | None = None,
+    provider: str = "",
+    model: str = "",
 ) -> Path:
     """Render findings to HTML and write to *path*."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render_html(findings, template_dir=template_dir))
+    out.write_text(render_html(findings, template_dir=template_dir, provider=provider, model=model))
     return out
 
 
@@ -164,13 +175,15 @@ def write_pdf(
     path: str | Path,
     *,
     template_dir: str | Path | None = None,
+    provider: str = "",
+    model: str = "",
 ) -> Path:
     """Render findings to PDF via WeasyPrint and write to *path*."""
     from weasyprint import HTML
 
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    html_str = render_html(findings, template_dir=template_dir)
+    html_str = render_html(findings, template_dir=template_dir, provider=provider, model=model)
     HTML(string=html_str).write_pdf(str(out))
     return out
 
@@ -181,6 +194,8 @@ def compose(
     pdf_path: str | Path | None = None,
     *,
     template_dir: str | Path | None = None,
+    provider: str = "",
+    model: str = "",
 ) -> dict:
     """Render HTML and/or PDF reports as requested.
 
@@ -188,7 +203,11 @@ def compose(
     """
     written: dict = {}
     if html_path:
-        written["html"] = str(write_html(findings, html_path, template_dir=template_dir))
+        written["html"] = str(
+            write_html(findings, html_path, template_dir=template_dir, provider=provider, model=model)
+        )
     if pdf_path:
-        written["pdf"] = str(write_pdf(findings, pdf_path, template_dir=template_dir))
+        written["pdf"] = str(
+            write_pdf(findings, pdf_path, template_dir=template_dir, provider=provider, model=model)
+        )
     return written

@@ -210,6 +210,8 @@ async def run_new_submit(
     # Ensemble (optional): repeated provider/model pairs + a quorum.
     ensemble_provider: list[str] = Form(default_factory=list),  # noqa: B008
     ensemble_model: list[str] = Form(default_factory=list),  # noqa: B008
+    ensemble_base_url: list[str] = Form(default_factory=list),  # noqa: B008
+    ensemble_local: list[str] = Form(default_factory=list),  # noqa: B008
     quorum: int | None = Form(None),
 ) -> RedirectResponse:
     _validate_provider(provider, local_only)
@@ -222,19 +224,31 @@ async def run_new_submit(
 
     # Validate + normalize the ensemble. The primary (provider, model) is the
     # first ensemble member; the extras are zipped from the repeated fields.
-    ensemble: list[tuple[str, str]] | None = None
+    ensemble: list[dict[str, object]] | None = None
     if ensemble_provider or ensemble_model:
         if len(ensemble_provider) != len(ensemble_model):
             raise HTTPException(
                 status_code=400,
                 detail="ensemble_provider and ensemble_model must be the same length",
             )
-        members = list(zip(ensemble_provider, ensemble_model, strict=False))
-        # All-cloud checking for the extras (the primary is checked above).
-        for prov, mdl in members:
+        members: list[dict[str, object]] = []
+        for i, (prov, mdl) in enumerate(zip(ensemble_provider, ensemble_model, strict=False)):
             _validate_provider(prov, local_only)
             if not mdl.strip():
                 raise HTTPException(status_code=400, detail="ensemble model must not be empty")
+            base = ensemble_base_url[i] if i < len(ensemble_base_url) else ""
+            loc = ensemble_local[i] if i < len(ensemble_local) else ""
+            if prov == "custom" and not base.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Base URL is required for custom ensemble member #{i + 1}.",
+                )
+            members.append({
+                "provider": prov,
+                "model": mdl,
+                "base_url": base.strip() or None,
+                "local": loc == "1",
+            })
         ensemble = members
 
     reasoning = reasoning_effort or None

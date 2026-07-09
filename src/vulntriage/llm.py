@@ -56,8 +56,10 @@ class OpenAICompatibleClient:
         model: str,
         reasoning_effort: str | None = None,
         local: bool,
+        provider: str = "",
     ) -> None:
         self.model = model
+        self.provider = provider
         self._reasoning_effort = reasoning_effort
         # Whether this provider is self-hosted (reserved for --local-only).
         self._local = local
@@ -297,6 +299,7 @@ def make_client(
         model=model,
         reasoning_effort=reasoning_effort,
         local=resolved_local,
+        provider=provider,
     )
 
 

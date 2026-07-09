@@ -24,8 +24,8 @@
   <div id="input-fields">
     <div class="row">
       <label>Scanner output files <span class="req">*</span></label>
-      <input type="file" name="files" multiple accept=".xml,.jsonl,.json">
-      <div class="hint">XML (Nmap), JSONL (Nuclei), or JSON (synthetic). One or more; findings are merged.</div>
+      <input type="file" name="files" multiple accept=".xml,.jsonl,.json,.csv">
+      <div class="hint">XML (Nmap), JSONL (Nuclei), CSV (OpenVAS) or JSON (synthetic). One or more; findings are merged.</div>
     </div>
     {% if sample_available %}
     <div class="row check">

@@ -31,10 +31,16 @@ window.VulnTriage = (function () {
     if (!selectEl) return;
     let baseUrl = "", apiKey = "";
     if (selectEl.value === "custom") {
-      const b = document.querySelector("input[name=custom_base_url]");
       const k = document.querySelector("input[name=api_key]");
-      baseUrl = b ? b.value : "";
       apiKey = k ? k.value : "";
+      if (selectEl.name === "ensemble_provider") {
+        const row = selectEl.closest("[data-model-row]");
+        const b = row ? row.querySelector("input[name=ensemble_base_url]") : null;
+        baseUrl = b ? b.value : "";
+      } else {
+        const b = document.querySelector("input[name=custom_base_url]");
+        baseUrl = b ? b.value : "";
+      }
     }
     setOptions(await fetchModels(selectEl.value, baseUrl, apiKey));
   }
@@ -48,7 +54,7 @@ window.VulnTriage = (function () {
   }
 
   function onLocalOnlyToggle(checked) {
-    const selects = document.querySelectorAll("select[name=provider]");
+    const selects = document.querySelectorAll("select[name=provider], select[name=ensemble_provider]");
     selects.forEach((sel) => {
       Array.from(sel.options).forEach((o) => {
         o.hidden = checked && !o.dataset.local;
@@ -74,17 +80,61 @@ window.VulnTriage = (function () {
     const pSelect = document.createElement("select");
     pSelect.name = "ensemble_provider";
     const primary = document.querySelector("select[name=provider]");
+    const primaryProv = primary ? primary.value : "";
     if (primary) {
       Array.from(primary.options).forEach((o) => {
         const c = o.cloneNode(true);
         pSelect.appendChild(c);
       });
+      // Default to the same provider as the primary.
+      pSelect.value = primaryProv;
     }
-    pSelect.addEventListener("change", () => refreshModels(pSelect));
+    pSelect.addEventListener("change", () => {
+      const customDiv = row.querySelector(".ensemble-custom-fields");
+      if (customDiv) {
+        customDiv.style.display = pSelect.value === "custom" ? "" : "none";
+      }
+      refreshModels(pSelect);
+    });
     const pLabel = document.createElement("label");
     pLabel.textContent = `Scoring model provider #${n + 2}`;
     row.appendChild(pLabel);
     row.appendChild(pSelect);
+    // Custom provider fields for this ensemble row (hidden unless provider=custom).
+    const customDiv = document.createElement("div");
+    customDiv.className = "ensemble-custom-fields";
+    customDiv.style.display = "none";
+    customDiv.style.marginTop = "4px";
+    const baseInput = document.createElement("input");
+    baseInput.type = "text";
+    baseInput.name = "ensemble_base_url";
+    baseInput.placeholder = "http://localhost:8080/v1";
+    baseInput.style.marginRight = "6px";
+    customDiv.appendChild(baseInput);
+    const localLabel = document.createElement("label");
+    localLabel.style.fontWeight = "400";
+    const localCheck = document.createElement("input");
+    localCheck.type = "checkbox";
+    localCheck.name = "ensemble_local";
+    localCheck.value = "1";
+    localCheck.style.marginRight = "3px";
+    localLabel.appendChild(localCheck);
+    localLabel.appendChild(document.createTextNode("local"));
+    customDiv.appendChild(localLabel);
+    const customHint = document.createElement("div");
+    customHint.className = "hint";
+    customHint.textContent = "Defaults to the primary provider's settings. Change provider above to override.";
+    customDiv.appendChild(customHint);
+    row.appendChild(customDiv);
+    // If the primary provider is custom, pre-fill base_url and show the fields.
+    if (primaryProv === "custom") {
+      customDiv.style.display = "";
+      const primaryBase = document.querySelector("input[name=custom_base_url]");
+      if (primaryBase) baseInput.value = primaryBase.value;
+      const primaryLocal = document.getElementById("custom_local");
+      if (primaryLocal && primaryLocal.checked) localCheck.checked = true;
+      // Also default the local checkbox on the primary's custom_local state.
+    }
     // Model input + remove button.
     const mRow = document.createElement("div");
     mRow.style.marginTop = "6px";
@@ -107,6 +157,8 @@ window.VulnTriage = (function () {
     // Apply current local-only gating to the new select.
     const cb = document.getElementById("local_only");
     if (cb && cb.checked) onLocalOnlyToggle(true);
+    // Populate model suggestions for the default provider.
+    refreshModels(pSelect);
   }
 
   function onEnsembleToggle(checked) {

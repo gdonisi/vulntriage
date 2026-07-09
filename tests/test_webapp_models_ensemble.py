@@ -128,8 +128,8 @@ def test_ensemble_post_with_extra_models_reaches_done(client):
     rec = runs_mod.registry.get(run_id)
     assert rec is not None
     assert rec.params.get("ensemble") == [
-        {"provider": "ollama", "model": "a"},
-        {"provider": "lmstudio", "model": "b"},
+        {"provider": "ollama", "model": "a", "base_url": None, "local": False},
+        {"provider": "lmstudio", "model": "b", "base_url": None, "local": False},
     ]
     assert rec.params.get("quorum") == 2
 

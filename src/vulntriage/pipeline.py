@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .enricher import enrich_all
-from .llm import LLMClient
+from .llm import LLMClient, PROVIDER_LABELS
 from .models import PrioritizedFinding, RawFinding, RemediatedFinding
 from .prioritizer import load_asset_registry, prioritize
 from .remediator import remediate_all
@@ -166,7 +166,17 @@ def run_pipeline(
             )
         html_path = out_dir / "report.html" if output_format in ("html", "both") else None
         pdf_path = out_dir / "report.pdf" if output_format in ("pdf", "both") else None
-        written = compose_report(report_findings, html_path=html_path, pdf_path=pdf_path)
+        provider_label = PROVIDER_LABELS.get(
+            getattr(client, "provider", ""),
+            getattr(client, "provider", ""),
+        )
+        written = compose_report(
+            report_findings,
+            html_path=html_path,
+            pdf_path=pdf_path,
+            provider=provider_label,
+            model=client.model,
+        )
         for fmt, path in written.items():
             print(f"[pipeline] {fmt} report written to {path}")
 

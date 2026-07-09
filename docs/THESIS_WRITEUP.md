@@ -821,3 +821,56 @@ disk.
 The existing `docker/nuclei/Dockerfile` and `docker/nmap/Dockerfile`
 (standalone scanner containers) are preserved — they remain the fallback used
 when running on a host without a local scanner installation.
+
+### 18.6 Vulnerable Lab (`vuln-lab`)
+
+`docker/vuln-lab/compose.yaml` defines two deliberately vulnerable targets
+for end-to-end pipeline testing:
+
+- **DVWA** (Damn Vulnerable Web Application) — `vulnerables/web-dvwa:latest`,
+  exposed on `127.0.0.1:4280`. A PHP/MySQL web application with intentionally
+  included vulnerabilities (SQL injection, XSS, CSRF, command injection,
+  file inclusion, etc.). Used to validate the pipeline against real Nuclei
+  findings from a well-known vulnerable target.
+
+- **Gitea 1.4.0** — `vulhub/gitea:1.4.0`, exposed on port `3000` (HTTP) and
+  `20022` (SSH). A self-hosted Git service with known vulnerabilities in this
+  version (e.g., CVE-2018-18925, CVE-2019-11229). Used to test the pipeline
+  against a real application with CVEs.
+
+Both services attach to the external bridge network `vuln-net`, which the
+vulntriage container also joins. Nuclei and Nmap scans can reach the targets
+by container name (`dvwa`, `gitea`) via Docker's embedded DNS.
+
+```bash
+docker network create -d bridge vuln-net   # first time only
+docker compose -f docker/vuln-lab/compose.yaml up -d
+```
+
+---
+
+## 19. Experimental Runs
+
+Documents the actual pipeline runs and evaluation experiments executed during
+the thesis work. Each run's report is preserved under `output/runs/<ts>/` and
+eval results under `output/eval/<ts>/`.
+
+| #  | Date       | Input                                        | Model(s)                                                                                                                       | Notes                                                                                     |
+|----|------------|----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| 1  | 2026-07-04 | Synthetic dataset (20 findings)              | `qwen3.5-4b` (LM Studio, local)                                                                                               | Full pipeline with remediation; few-shot scoring; RAG on                                  |
+| 2  | 2026-07-05 | Nuclei scan on DVWA (22 findings)            | `deepseek-v4-flash` (OpenRouter)                                                                                             | Real Nuclei JSONL against the vuln-lab DVWA target; few-shot; RAG on                      |
+| 3  | 2026-07-09 | Nuclei scan on Gitea (47 findings)           | `mimo-v2.5-pro` (custom provider)                                                                                             | Real Nuclei JSONL against the vuln-lab Gitea target; few-shot; RAG on                     |
+| 4  | 2026-07-09 | OpenVAS CSV export (14 findings)             | Ensemble: `deepseek-v4-pro` (primary — enrichment + remediation) + `glm-5.2` + `kimi-k2.6` (scoring only); quorum 2            | Real OpenVAS scan against a test network; ensemble scoring; few-shot; RAG on; 0 Unresolved |
+| 5  | 2026-07-09 | Synthetic dataset (evaluation grid)          | `deepseek-v4-flash` (custom provider)                                                                                         | Complete eval harness: 4 cells (2 prompt strategies × 2 RAG conditions) × 3 repeats = 12 runs; metrics in `output/eval/20260709-194332-2c9f1b/` |
+
+Run #4 is an ensemble run: the primary model (`deepseek-v4-pro`) handles
+enrichment and remediation for all 14 findings, while the exploitability
+scorer fans out across all three models (`deepseek-v4-pro`, `glm-5.2`,
+`kimi-k2.6`) with a strict-majority quorum of 2. All 14 findings reached
+quorum (0 Unresolved).
+
+Run #5 exercises the full evaluation harness against the 20-finding synthetic
+dataset, producing per-cell metrics (macro-averaged precision/recall/F1,
+Spearman ρ for pipeline and CVSS baseline, latency, throughput ratio, token
+usage) across 4 conditions × 3 repeats. Results are stored in
+`metrics.json` (per-cell mean ± std) and `results.csv` (one row per run).
