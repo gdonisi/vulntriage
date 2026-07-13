@@ -1,6 +1,6 @@
 # Implementation Plan: Triage Pipeline v2
 
-Source spec: `docs/specs/2026-06-30-triage-pipeline-v2-design.md`
+Source spec: `docs/specs/triage-pipeline-v2-design.md`
 
 Conventions:
 - Each task ends with a green check (`Definition of Done`) — don't move on until it passes.
@@ -14,10 +14,10 @@ Conventions:
 ## Phase 0 — Foundation
 
 ### Task 0.1 — Add v2 dependencies
-- Add to `pyproject.toml`: `jinja2>=3.1`, `weasyprint>=60`, `scipy>=1.13`, `matplotlib>=3.9`.
+- Add to `pyproject.toml`: `jinja2>=3.1`, `weasyprint>=60`, `scipy>=1.13`.
 - Add `pytest>=8` and `pytest-mock>=3` to a `[dependency-groups] dev` section.
 - Run `uv sync`.
-- **DoD:** `uv sync` succeeds; `uv run python -c "import jinja2, weasyprint, scipy, matplotlib, pytest"` exits 0.
+- **DoD:** `uv sync` succeeds; `uv run python -c "import jinja2, weasyprint, scipy, pytest"` exits 0.
 
 ### Task 0.2 — Create output directories & gitignore entries
 - Create `output/eval/`, `output/reports/`, `data/templates/`, `tests/`.

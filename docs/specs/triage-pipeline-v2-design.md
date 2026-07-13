@@ -192,8 +192,7 @@ producing metrics from saved intermediates.
 9. **Extend the CLI** — add `--remediate`, `--output-format html|pdf|both`,
    `--rag/--no-rag`, `--prompt-strategy few-shot|zero-shot`, `--evaluate` flags.
    Wire remediator + report composer into the main pipeline flow.
-10. **Add dependencies** — `jinja2`, `weasyprint`, `scipy` (for Spearman),
-    `matplotlib` (optional, for eval charts) to `pyproject.toml`.
+10. **Add dependencies** — `jinja2`, `weasyprint`, `scipy` to `pyproject.toml`.
 11. **Write tests** — unit tests for remediator (with/without RAG hits), report
     composer (template renders, PDF generates), eval harness (metric
     computation on a tiny known dataset).
@@ -234,7 +233,7 @@ tests/
   test_report_composer.py   # NEW
   test_evaluation.py        # NEW
 
-pyproject.toml              # MODIFY: add jinja2, weasyprint, scipy, matplotlib
+pyproject.toml              # MODIFY: add jinja2, weasyprint, scipy
 README.md                   # MODIFY: document v2
 docs/specs/
   2026-06-30-triage-pipeline-v2-design.md  # NEW: this design doc

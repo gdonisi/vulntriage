@@ -5,16 +5,15 @@ description = "LLM-enabled vulnerability investigation and triaging system"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "pydantic>=2.13",
-    "openai>=2.44",
-    "pyyaml>=6.0",
-    "jinja2>=3.1.6",
-    "weasyprint>=69.0",
-    "scipy>=1.18.0",
-    "matplotlib>=3.11.0",
-    "fastapi>=0.139",
-    "uvicorn>=0.50",
-    "python-multipart>=0.0.18",
+    "pydantic>=2,<3",
+    "openai>=2,<3",
+    "pyyaml>=6,<7",
+    "jinja2>=3,<4",
+    "weasyprint>=69,<70",
+    "scipy>=1,<2",
+    "fastapi>=0,<1",
+    "uvicorn>=0,<1",
+    "python-multipart>=0,<1",
 ]
 
 [project.scripts]
@@ -37,8 +36,8 @@ select = ["E", "F", "I", "UP", "B"]
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
-    "pytest-cov>=7.1.0",
-    "pytest-mock>=3.15.1",
-    "httpx>=0.28.1",
+    "pytest>=9,<10",
+    "pytest-cov>=7,<8",
+    "pytest-mock>=3,<4",
+    "httpx>=0,<1",
 ]
