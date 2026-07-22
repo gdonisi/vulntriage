@@ -17,3 +17,4 @@ wheels/
 .pytest_cache/
 htmlcov/
 output/eval/
+THESIS*.md
