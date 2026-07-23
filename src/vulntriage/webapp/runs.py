@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import io
 import re
+import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,7 +73,7 @@ class RunRecord:
 
 
 class _StdoutCapture(io.TextIOBase):
-    """Per-thread stdout capturing lines into a run's progress buffer."""
+    """Per-run stdout capturing lines into a run's progress buffer."""
 
     def __init__(self, record: RunRecord) -> None:
         self._record = record
@@ -92,6 +93,65 @@ class _StdoutCapture(io.TextIOBase):
 
     def flush(self) -> None:  # noqa: D401
         pass
+
+
+class _ThreadStdoutProxy(io.TextIOBase):
+    """A ``sys.stdout`` that routes each thread's writes to its active capture.
+
+    ``contextlib.redirect_stdout`` swaps the process-global ``sys.stdout``, so
+    two concurrent worker threads clobber each other's capture and, worse, can
+    leave a dead capture installed as ``sys.stdout`` (swallowing uvicorn logs).
+    This proxy is installed once and dispatches on a thread-local: a thread
+    with an active capture (via :func:`_capture_stdout`) writes there; every
+    other thread (CLI prints, uvicorn logs) falls through to the real stdout.
+    """
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+
+    @property
+    def _current(self) -> _StdoutCapture | None:
+        return getattr(_thread_captures, "current", None)
+
+    def write(self, s: str) -> int:
+        cap = self._current
+        if cap is not None:
+            return cap.write(s)
+        return self._real.write(s)
+
+    def flush(self) -> None:
+        cap = self._current
+        if cap is not None:
+            cap.flush()
+            return
+        return self._real.flush()
+
+    def __getattr__(self, name: str) -> Any:
+        # isatty(), encoding, fileno(), … — delegate to the real stream.
+        return getattr(self._real, name)
+
+
+# Per-thread active capture (set by _capture_stdout). None on the main thread
+# and on any worker thread outside its capture window.
+_thread_captures = threading.local()
+
+# Install the proxy exactly once, wrapping whatever stdout is current. When no
+# capture is active for a thread the proxy is a transparent passthrough, so
+# CLI/pytest/uvicorn output is unaffected.
+if not isinstance(sys.stdout, _ThreadStdoutProxy):
+    sys.stdout = _ThreadStdoutProxy(sys.stdout)
+
+
+@contextlib.contextmanager
+def _capture_stdout(record: RunRecord):
+    """Activate *record*'s progress capture for the current thread only."""
+    cap = _StdoutCapture(record)
+    prev = getattr(_thread_captures, "current", None)
+    _thread_captures.current = cap
+    try:
+        yield
+    finally:
+        _thread_captures.current = prev
 
 
 class RunRegistry:
@@ -119,6 +179,17 @@ class RunRegistry:
 
 
 registry = RunRegistry()
+
+
+def _started_at_from_run_id(run_id: str) -> str:
+    """Best-effort 'YYYYMMDD-HHMMSS' started_at from a '<ts>-<6hex>' run id.
+
+    Uses the 15-char timestamp prefix when present so live and recovered runs
+    share the same date+time (rather than only the date).
+    """
+    if len(run_id) >= 15 and run_id[:8].isdigit() and run_id[8] == "-":
+        return run_id[:15]
+    return run_id
 
 
 def _new_run_id(kind: str, ts: str) -> str:
@@ -152,12 +223,17 @@ def start_triage(
     custom_base_url: str | None = None,
     api_key: str | None = None,
     custom_local: bool = False,
+    run_id: str | None = None,
 ) -> str:
-    """Create a run record, spawn the worker, and return the run id."""
+    """Create a run record, spawn the worker, and return the run id.
+
+    *run_id* lets the caller preallocate the run dir (e.g. so webapp uploads
+    land inside it before the worker starts); when omitted a fresh id is made.
+    """
     from datetime import datetime
 
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_id = _new_run_id("triage", ts)
+    run_id = run_id or _new_run_id("triage", ts)
     run_dir = RUNS_ROOT / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     params: dict[str, Any] = {
@@ -184,7 +260,7 @@ def start_triage(
         kind="triage",
         run_dir=run_dir,
         state=PENDING,
-        started_at=ts,
+        started_at=_started_at_from_run_id(run_id),
         params=params,
     )
     registry.add(record)
@@ -209,7 +285,12 @@ def _build_scoring_clients(record: RunRecord, primary_client: Any) -> list[Any] 
                 m["model"],
                 reasoning_effort=p["reasoning_effort"],
                 base_url=m.get("base_url"),
-                api_key=p.get("api_key"),
+                # Each member resolves its own credentials from its provider's
+                # env var (or stays keyless for local/custom servers). Never
+                # forward the primary's api_key: it belongs to a different
+                # endpoint and would leak the custom credential to, e.g.,
+                # api.openai.com.
+                api_key=m.get("api_key"),
                 local=m.get("local", False),
             )
         )
@@ -230,6 +311,8 @@ def _triage_worker(record: RunRecord) -> None:
     record.state = RUNNING
     p = record.params
     try:
+        # make_client doesn't print and may raise (bad custom config); keep it
+        # outside the capture so its error trace is recorded directly.
         client = make_client(
             p["provider"],
             p["model"],
@@ -239,18 +322,19 @@ def _triage_worker(record: RunRecord) -> None:
             local=p.get("custom_local", False),
         )
         scoring_clients = _build_scoring_clients(record, client)
-        findings: list = []
-        for ip in p["input_paths"]:
-            parsed = parse(ip)
-            findings.extend(parsed)
-            print(f"[pipeline] parsed {len(parsed)} findings from {ip}")
-        if not findings:
-            print("[pipeline] no findings to process")
-            record.state = DONE
-            record.counts = {"total": 0}
-            return
-
-        with contextlib.redirect_stdout(_StdoutCapture(record)):
+        # Parse (and its progress prints) run inside the capture so the run's
+        # progress feed sees them, just like the scan worker.
+        with _capture_stdout(record):
+            findings: list = []
+            for ip in p["input_paths"]:
+                parsed = parse(ip)
+                findings.extend(parsed)
+                print(f"[pipeline] parsed {len(parsed)} findings from {ip}")
+            if not findings:
+                print("[pipeline] no findings to process")
+                record.state = DONE
+                record.counts = {"total": 0}
+                return
             result = run_pipeline(
                 findings,
                 client,
@@ -306,7 +390,7 @@ def start_triage_scan(
         kind="triage",
         run_dir=run_dir,
         state=PENDING,
-        started_at=ts,
+        started_at=_started_at_from_run_id(run_id),
         params={
             "scan_target": target,
             "provider": provider,
@@ -339,7 +423,7 @@ def _triage_scan_worker(record: RunRecord) -> None:
     record.state = RUNNING
     p = record.params
     try:
-        with contextlib.redirect_stdout(_StdoutCapture(record)):
+        with _capture_stdout(record):
             # Stage 1: scan.
             out_path = record.run_dir / "nuclei_scan.jsonl"
             run_nuclei(p["scan_target"], out_path)
@@ -450,7 +534,7 @@ def _eval_worker(record: RunRecord) -> None:
             repeats=p["repeats"],
             output_dir=str(record.run_dir),
         )
-        with contextlib.redirect_stdout(_StdoutCapture(record)):
+        with _capture_stdout(record):
             run_experiment(config)
         record.state = DONE
     except Exception as e:  # noqa: BLE001
@@ -497,7 +581,7 @@ def recover_interrupted() -> None:
                 kind="triage",
                 run_dir=d,
                 state=INTERRUPTED,
-                started_at=run_id.split("-")[0],
+                started_at=_started_at_from_run_id(run_id),
             )
             _hydrate_params_from_report(rec)
             registry.add(rec)
@@ -511,7 +595,7 @@ def recover_interrupted() -> None:
                 kind="eval",
                 run_dir=d,
                 state=INTERRUPTED,
-                started_at=run_id.split("-")[0],
+                started_at=_started_at_from_run_id(run_id),
                 metrics_path=d / "metrics.json",
             )
             registry.add(rec)
@@ -533,7 +617,7 @@ def record_from_disk(run_id: str, kind: str) -> RunRecord:
         kind=kind,
         run_dir=d,
         state=state,
-        started_at=run_id.split("-")[0],
+        started_at=_started_at_from_run_id(run_id),
         metrics_path=(d / "metrics.json") if kind == "eval" else None,
     )
     if kind == "triage":

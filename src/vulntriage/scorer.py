@@ -106,22 +106,27 @@ def _strict_majority(
     tally: dict[str, int] = {}
     for label in votes.values():
         tally[label] = tally.get(label, 0) + 1
-    winner_label: str | None = None
+    # Highest tally wins; break ties by severity (High > Medium > Low) so the
+    # fallback is deterministic rather than dict-insertion order.
+    _severity = {"High": 3, "Medium": 2, "Low": 1}
+    winner_label = "Low"
     winner_count = 0
     for label, count in tally.items():
-        if count > winner_count:
+        if count > winner_count or (
+            count == winner_count
+            and _severity.get(label, 0) > _severity.get(winner_label, 0)
+        ):
             winner_label = label
             winner_count = count
     # votes come from Exploitability.value, so they are already canonical.
     _by_name = {e.value: e for e in Exploitability}
-    display_label = winner_label if winner_label else "Low"
-    exploitability = _by_name.get(display_label, Exploitability.LOW)
-    resolved = winner_count >= k and winner_label is not None
+    exploitability = _by_name.get(winner_label, Exploitability.LOW)
+    resolved = winner_count >= k
     summary = ", ".join(f"{lbl}={cnt}" for lbl, cnt in sorted(tally.items()))
-    decision = display_label if resolved else f"unresolved -> fallback {display_label}"
-    rationale = (
-        f"{winner_count if resolved else 0}/{n} models: {summary} (quorum {k} -> {decision})"
-    )
+    decision = winner_label if resolved else f"unresolved -> fallback {winner_label}"
+    # Report the actual highest tally even when unresolved (the "0/N" form
+    # was misleading — the tallies are the real information).
+    rationale = f"{winner_count}/{n} models: {summary} (quorum {k} -> {decision})"
     return exploitability, rationale, not resolved
 
 
@@ -153,9 +158,16 @@ def score_all(
             scored.append(score(f, client, few_shot=few_shot))
             continue
         votes: dict[str, str] = {}
+        # Key by model name, but disambiguate duplicates (e.g. the primary
+        # repeated in --ensemble, or the same model id via two providers) so
+        # votes never collapse — the quorum is computed on the real N.
+        seen_counts: dict[str, int] = {}
         for c in clients or []:
             s = score(f, c, few_shot=few_shot)
-            votes[c.model] = s.exploitability.value
+            base = c.model
+            seen_counts[base] = seen_counts.get(base, 0) + 1
+            key = base if seen_counts[base] == 1 else f"{base}#{seen_counts[base]}"
+            votes[key] = s.exploitability.value
         exploitability, rationale, unresolved = _strict_majority(votes, quorum)
         scored.append(
             ScoredFinding(

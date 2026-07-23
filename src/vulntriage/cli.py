@@ -273,7 +273,13 @@ def _check_local_only(
             offenders.append(f"{provider}")
     if models:
         for m in models:
-            if not is_local_provider(m.provider):
+            # A custom provider is local only when its spec says so (mirrors
+            # the `provider == "custom"` branch above); built-ins use the
+            # hardcoded local set.
+            if m.provider == "custom":
+                if not m.local:
+                    offenders.append(f"{m.provider}/{m.model}")
+            elif not is_local_provider(m.provider):
                 offenders.append(f"{m.provider}/{m.model}")
     if ensemble:
         for prov, mdl in ensemble:
@@ -357,7 +363,19 @@ def _run_evaluate(args: argparse.Namespace) -> int:
             input_path=args.input[0],
             asset_registry=args.asset_registry,
             kb_path=args.kb,
-            models=[ModelSpec(args.provider, args.model)],
+            # Forward the custom-provider connection details so make_client()
+            # later sees them; without these, `make_client("custom", base_url=None)`
+            # raises mid-experiment and --local ignored ModelSpec.local trips
+            # --local-only validation below.
+            models=[
+                ModelSpec(
+                    args.provider,
+                    args.model,
+                    base_url=args.base_url,
+                    api_key=args.api_key,
+                    local=args.local,
+                )
+            ],
             prompt_strategies=["few-shot", "zero-shot"],
             rag_conditions=[True, False],
             repeats=args.repeats,
@@ -420,6 +438,19 @@ def main(argv: list[str] | None = None) -> int:
         if not ensemble_members:
             print("--ensemble needs at least one provider:model member", file=sys.stderr)
             return 2
+        # The CLI has no way to pass --base-url/--api-key per ensemble member,
+        # so a `custom:...` member would crash at make_client mid-run. Reject it
+        # up front with a clear message (build a multi-model ensemble with a
+        # --eval-config file or via the webapp instead).
+        for prov, _mdl in ensemble_members:
+            if prov == "custom":
+                print(
+                    "Custom providers are not supported in --ensemble from the CLI "
+                    "(no way to pass --base-url per member); use an --eval-config "
+                    "file or the webapp.",
+                    file=sys.stderr,
+                )
+                return 2
 
     # Validate custom-provider args early before any work.
     if not args.scan_only and not args.evaluate:

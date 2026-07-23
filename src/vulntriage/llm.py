@@ -86,10 +86,8 @@ class OpenAICompatibleClient:
         usage = getattr(resp, "usage", None)
         if usage and getattr(usage, "total_tokens", None):
             self.total_tokens += usage.total_tokens
-        print(
-            f"  [llm] model={self.model} {elapsed:.2f}s "
-            f"tokens={usage.total_tokens if usage else '?'}"
-        )
+        toks = usage.total_tokens if usage and getattr(usage, "total_tokens", None) else "?"
+        print(f"  [llm] model={self.model} {elapsed:.2f}s tokens={toks}")
         return content
 
     def list_models(self) -> list[str]:

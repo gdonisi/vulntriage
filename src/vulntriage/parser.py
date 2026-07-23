@@ -18,6 +18,20 @@ from pathlib import Path
 from .models import RawFinding
 
 
+def _safe_float(value: object) -> float | None:
+    """Parse *value* as float, returning None for None/empty/non-numeric.
+
+    Real scanner output carries cvss-score as e.g. "N/A" or an outright null;
+    a bare ``float(value)`` would raise and abort the whole parse.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def parse(path: str | Path) -> list[RawFinding]:
     """Auto-detect format from file extension and parse accordingly."""
     p = Path(path)
@@ -42,7 +56,13 @@ def _parse_nmap(path: Path) -> list[RawFinding]:
         addr = host.find("address")
         ip = addr.get("addr", "unknown") if addr is not None else "unknown"
         for port_el in host.iter("port"):
-            port_id = int(port_el.get("portid", "0"))
+            portid_raw = port_el.get("portid", "")
+            # Missing/non-numeric portid (rare in real scans) used to fabricate a
+            # port-0 finding; keep the host/service info but leave port unset.
+            try:
+                port_id: int | None = int(portid_raw)
+            except ValueError:
+                port_id = None
             state_el = port_el.find("state")
             state = state_el.get("state") if state_el is not None else "unknown"
             if state != "open":
@@ -51,22 +71,23 @@ def _parse_nmap(path: Path) -> list[RawFinding]:
             service = service_el.get("name") if service_el is not None else None
             product = service_el.get("product") if service_el is not None else ""
             version = service_el.get("version") if service_el is not None else ""
-            desc_parts = [f"Open {port_id}/tcp"]
+            desc_parts = [f"Open {port_id if port_id is not None else '?'}/tcp"]
             if service:
                 desc_parts.append(service)
             if product or version:
                 desc_parts.append(f"{product} {version}".strip())
             desc = " — ".join(desc_parts)
+            port_token = port_id if port_id is not None else "noid"
             findings.append(
                 RawFinding(
-                    id=f"nmap-{ip}-{port_id}-{uuid.uuid4().hex[:8]}",
+                    id=f"nmap-{ip}-{port_token}-{uuid.uuid4().hex[:8]}",
                     source="nmap",
                     host=ip,
                     port=port_id,
                     service=service,
                     description=desc,
                     raw={
-                        "port": port_id,
+                        "port": port_id if port_id is not None else -1,
                         "state": state,
                         "service": service,
                         "product": product,
@@ -86,14 +107,17 @@ def _parse_nuclei(path: Path) -> list[RawFinding]:
                 continue
             record = json.loads(line)
             template_id = record.get("template-id", "unknown")
-            info = record.get("info", {})
+            # ``info`` may be null in real nuclei output; treat it as empty.
+            info = record.get("info") or {}
             name = info.get("name", template_id)
             severity = info.get("severity", "")
             tags = info.get("tags", [])
-            classification = info.get("classification", {})
-            cvss = classification.get("cvss-score")
+            classification = info.get("classification") or {}
+            cvss_raw = classification.get("cvss-score")
             cve_id = None
-            cve_list = classification.get("cve-id") or info.get("classification", {}).get("cve-id")
+            cve_list = classification.get("cve-id") or (
+                info.get("classification") or {}
+            ).get("cve-id")
             if isinstance(cve_list, list) and cve_list:
                 cve_id = cve_list[0]
             elif isinstance(cve_list, str):
@@ -107,7 +131,7 @@ def _parse_nuclei(path: Path) -> list[RawFinding]:
                     source="nuclei",
                     host=record.get("host", record.get("matched-at", "unknown")),
                     description=desc,
-                    cvss=float(cvss) if cvss else None,
+                    cvss=_safe_float(cvss_raw),
                     cve=cve_id,
                     raw=record,
                 )
@@ -132,7 +156,11 @@ def _parse_openvas(path: Path) -> list[RawFinding]:
         for row in reader:
             ip = row.get("IP") or "unknown"
             port_str = (row.get("Port") or "").strip()
-            port = int(port_str) if port_str else None
+            # Port may be a non-numeric token like "general" in OpenVAS exports.
+            try:
+                port = int(port_str) if port_str else None
+            except ValueError:
+                port = None
 
             # Derive a service label from the affected software / product detection,
             # falling back to the port protocol.

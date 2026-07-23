@@ -13,12 +13,13 @@ Behaviour is identical to calling the CLI on the same inputs: reports land in
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .enricher import enrich_all
-from .llm import LLMClient, PROVIDER_LABELS
+from .llm import PROVIDER_LABELS, LLMClient
 from .models import PrioritizedFinding, RawFinding, RemediatedFinding
 from .prioritizer import load_asset_registry, prioritize
 from .remediator import remediate_all
@@ -116,10 +117,14 @@ def run_pipeline(
     # 2. Score exploitability. If a scoring ensemble is supplied, only this
     # step fans out (multiple models); enrichment/remediation stay single-model.
     if scoring_clients:
+        # ``scoring_quorum or ...`` would misreport an explicit --quorum 0
+        # (falsy) as the default; mirror score_all's `is not None` semantics.
+        eff_quorum = (
+            scoring_quorum if scoring_quorum is not None else len(scoring_clients) // 2 + 1
+        )
         print(
             f"[pipeline] scoring exploitability (ensemble of {len(scoring_clients)} "
-            f"model(s), quorum={scoring_quorum or (len(scoring_clients) // 2 + 1)}, "
-            f"prompt strategy: {prompt_strategy})..."
+            f"model(s), quorum={eff_quorum}, prompt strategy: {prompt_strategy})..."
         )
         scored = score_all(
             enriched,
@@ -148,7 +153,11 @@ def run_pipeline(
     written: dict[str, str] = {}
     text_report: str | None = None
     if output_format == "text":
-        report = render(prioritized)
+        # Pass remediated findings (a PrioritizedFinding subclass) to the
+        # text renderer when remediation ran, otherwise its LLM calls, tokens,
+        # and latency are silently discarded. The renderer only emits the
+        # remediation block when steps are actually present.
+        report = render(remediated if remediated is not None else prioritized)
         if text_output:
             Path(text_output).parent.mkdir(parents=True, exist_ok=True)
             Path(text_output).write_text(report)
@@ -162,7 +171,7 @@ def run_pipeline(
             print(
                 "[pipeline] note: rendering HTML/PDF without remediation; "
                 "remediation sections will be empty.",
-                file=__import__("sys").stderr,
+                file=sys.stderr,
             )
         html_path = out_dir / "report.html" if output_format in ("html", "both") else None
         pdf_path = out_dir / "report.pdf" if output_format in ("pdf", "both") else None

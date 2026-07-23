@@ -94,9 +94,9 @@ def _resolve_docker_hostname(hostname: str) -> str | None:
         return None
 
 
-def _resolve_targets(targets: str | list[str]) -> str:
+def _resolve_targets_list(targets: str | list[str]) -> list[str]:
     """Replace single-label hostnames with their Docker IPs,
-    preserving port/path if present."""
+    preserving port/path if present. Returns one entry per input target."""
     items = [targets] if isinstance(targets, str) else targets
     resolved: list[str] = []
     for t in items:
@@ -108,7 +108,14 @@ def _resolve_targets(targets: str | list[str]) -> str:
                 resolved.append(t.replace(host, ip, 1))
                 continue
         resolved.append(t)
-    return ",".join(resolved)
+    return resolved
+
+
+def _resolve_targets(targets: str | list[str]) -> str:
+    """Comma-joined resolved targets for tools that accept a single
+    ``-u a,b,c`` list (e.g. nuclei). Nmap wants one argv element per target
+    — use :func:`_resolve_targets_list` and ``cmd.extend(...)`` for nmap."""
+    return ",".join(_resolve_targets_list(targets))
 
 
 def run_nuclei(
@@ -269,8 +276,11 @@ def _run_nmap_binary(
     extra_args: list[str] | None,
 ) -> Path:
     """Run the nmap binary directly (no Docker)."""
-    target_list = targets if isinstance(targets, str) else " ".join(targets)
-    cmd = [binary, "-oX", "-", target_list]
+    # nmap treats each argv element as one target spec (it does not split on
+    # whitespace), so a list of targets must be spread across argv — joining
+    # them into one element makes nmap see a single unresolvable "host".
+    cmd = [binary, "-oX", "-"]
+    cmd.extend([targets] if isinstance(targets, str) else targets)
     if extra_args:
         cmd.extend(extra_args)
 
@@ -295,7 +305,9 @@ def _run_nmap_docker(
     Nmap XML output is written to stdout via ``-oX -`` and captured here,
     so no volume mount is needed.
     """
-    target_list = _resolve_targets(targets)
+    # nmap wants one argv element per target; a comma-joined string like
+    # "ip1,ip2" is octet-list syntax ("192.168.0,2.1"), not two targets.
+    targets_list = _resolve_targets_list(targets)
 
     cmd = [
         "docker",
@@ -305,8 +317,8 @@ def _run_nmap_docker(
         image,
         "-oX",
         "-",
-        target_list,
     ]
+    cmd.extend(targets_list)
     if extra_args:
         cmd.extend(extra_args)
 

@@ -99,6 +99,24 @@ def test_write_intermediates_via_save_helper(tmp_path):
     assert (d / "enriched.json").exists()
 
 
+def test_run_pipeline_text_remediate(tmp_path):
+    # Regression: in text mode the remediation step's output used to be
+    # discarded (render(prioritized) ignored the RemediatedFindings). The
+    # text report must now include the generated remediation steps.
+    result = run_pipeline(
+        _findings()[:2],
+        _MockClient(),
+        out_dir=tmp_path / "run",
+        output_format="text",
+        remediate=True,
+        asset_registry=str(DATA_DIR / "assets.yaml"),
+    )
+    assert result.text_report is not None
+    assert result.remediated is not None
+    assert "Remediation:" in result.text_report
+    assert "Upgrade" in result.text_report
+
+
 def test_run_pipeline_remediate_off(tmp_path):
     result = run_pipeline(
         _findings()[:2],

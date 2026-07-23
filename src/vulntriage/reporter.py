@@ -41,6 +41,14 @@ def render(findings: list[PrioritizedFinding]) -> str:
         if votes:
             vote_str = ", ".join(f"{m}={lbl}" for m, lbl in sorted(votes.items()))
             lines.append(f"  Votes: {vote_str}")
+        steps = getattr(f, "remediation_steps", None) or []
+        if steps:
+            lines.append("  Remediation:")
+            for i, s in enumerate(steps, 1):
+                lines.append(f"    {i}. {s}")
+            rationale = getattr(f, "remediation_rationale", "")
+            if rationale:
+                lines.append(f"  Remediation rationale: {rationale}")
         lines.append("")
 
     lines.append("-" * BAR_LENGTH)

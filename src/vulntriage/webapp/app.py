@@ -19,7 +19,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -112,25 +118,30 @@ def _providers_for_view(local_only: bool) -> list[dict[str, Any]]:
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request) -> HTMLResponse:
     live = sorted(runs_mod.registry.all_runs(), key=lambda r: r.run_id, reverse=True)
+    # Live in-memory runs are a mixed list (triage + eval); separate them by
+    # kind so each section renders only its own runs and links resolve.
+    live_triage = [r for r in live if r.kind == "triage"]
+    live_eval = [r for r in live if r.kind == "eval"]
     triage_dirs = runs_mod.list_run_dirs()
     eval_dirs = runs_mod.list_eval_dirs()
-    # Merge live and on-disk, preferring live records.
-    seen = {r.run_id for r in live}
+    # Merge live and on-disk, preferring live records, per kind.
+    seen_triage = {r.run_id for r in live_triage}
+    seen_eval = {r.run_id for r in live_eval}
     on_disk: list[runs_mod.RunRecord] = []
     for d in triage_dirs:
-        if d.name in seen:
+        if d.name in seen_triage:
             continue
         on_disk.append(runs_mod.record_from_disk(d.name, "triage"))
     eval_on_disk: list[runs_mod.RunRecord] = []
     for d in eval_dirs:
-        if d.name in seen:
+        if d.name in seen_eval:
             continue
         eval_on_disk.append(runs_mod.record_from_disk(d.name, "eval"))
     return _render(
         request,
         "dashboard.html",
-        triage_runs=live + on_disk,
-        eval_runs=eval_on_disk,
+        triage_runs=live_triage + on_disk,
+        eval_runs=live_eval + eval_on_disk,
         sample_available=SAMPLE_INPUT.exists(),
     )
 
@@ -142,8 +153,11 @@ def dashboard(request: Request) -> HTMLResponse:
 
 @app.get("/runs", response_class=HTMLResponse)
 def runs_list(request: Request) -> HTMLResponse:
-    live = sorted(runs_mod.registry.all_runs(), key=lambda r: r.run_id, reverse=True)
-    seen = {r.run_id for r in live if r.kind == "triage"}
+    all_live = sorted(runs_mod.registry.all_runs(), key=lambda r: r.run_id, reverse=True)
+    # Only triage runs belong on the /runs page; live eval runs have no report
+    # here and would link to a 404.
+    live = [r for r in all_live if r.kind == "triage"]
+    seen = {r.run_id for r in live}
     on_disk = [runs_mod.record_from_disk(d.name, "triage") for d in runs_mod.list_run_dirs()]
     on_disk = [r for r in on_disk if r.run_id not in seen]
     return _render(request, "runs_list.html", runs=live + on_disk)
@@ -214,7 +228,7 @@ async def run_new_submit(
     ensemble_local: list[str] = Form(default_factory=list),  # noqa: B008
     quorum: int | None = Form(None),
 ) -> RedirectResponse:
-    _validate_provider(provider, local_only)
+    _validate_provider(provider, local_only, custom_local=custom_local)
 
     # Validate custom provider args before any work.
     if provider == "custom" and not custom_base_url.strip():
@@ -233,11 +247,11 @@ async def run_new_submit(
             )
         members: list[dict[str, object]] = []
         for i, (prov, mdl) in enumerate(zip(ensemble_provider, ensemble_model, strict=False)):
-            _validate_provider(prov, local_only)
             if not mdl.strip():
                 raise HTTPException(status_code=400, detail="ensemble model must not be empty")
             base = ensemble_base_url[i] if i < len(ensemble_base_url) else ""
             loc = ensemble_local[i] if i < len(ensemble_local) else ""
+            _validate_provider(prov, local_only, custom_local=(loc == "1"))
             if prov == "custom" and not base.strip():
                 raise HTTPException(
                     status_code=400,
@@ -280,10 +294,15 @@ async def run_new_submit(
     # dataset mode: uploads or sample.
     input_paths: list[str] = []
     run_ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Precompute the run id so uploaded files land *inside* the real run dir
+    # ("output/runs/<ts>-<hex>/..."), which start_triage will reuse. Saving
+    # them under the bare "<ts>" dir left a ghost interrupted entry (no report
+    # ever appeared there) on every upload-based run.
+    run_id = runs_mod._new_run_id("triage", run_ts)
     for i, uf in enumerate(files):
         if not uf.filename:
             continue
-        saved = runs_mod.RUNS_ROOT / run_ts / f"upload_{i}_{uf.filename}"
+        saved = runs_mod.RUNS_ROOT / run_id / f"upload_{i}_{uf.filename}"
         saved.parent.mkdir(parents=True, exist_ok=True)
         saved.write_bytes(await uf.read())
         input_paths.append(str(saved))
@@ -291,7 +310,7 @@ async def run_new_submit(
         input_paths.insert(0, str(SAMPLE_INPUT))
     if not input_paths:
         # Clean the empty upload dir.
-        d = runs_mod.RUNS_ROOT / run_ts
+        d = runs_mod.RUNS_ROOT / run_id
         if d.exists() and not any(d.iterdir()):
             d.rmdir()
         raise HTTPException(status_code=400, detail="Provide at least one input file.")
@@ -312,6 +331,7 @@ async def run_new_submit(
         custom_base_url=custom_base_url.strip() or None,
         api_key=api_key.strip() or None,
         custom_local=custom_local,
+        run_id=run_id,
     )
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
@@ -369,10 +389,17 @@ def run_download(run_id: str) -> Any:
             if p.is_file():
                 zf.write(p, arcname=p.name)
     buf.seek(0)
-    return FileResponse(
-        buf,
+    # FileResponse expects a *file path* and calls os.stat() on it; passing a
+    # BytesIO raises TypeError -> 500 on every download. Return the in-memory
+    # bytes directly with an explicit Content-Disposition instead.
+    return Response(
+        buf.getvalue(),
         media_type="application/zip",
-        filename=f"vulntriage-{run_id}-intermediates.zip",
+        headers={
+            "content-disposition": (
+                f'attachment; filename="vulntriage-{run_id}-intermediates.zip"'
+            )
+        },
     )
 
 
@@ -412,7 +439,7 @@ def eval_new_submit(
     api_key: str = Form(""),
     custom_local: bool = Form(False),
 ) -> RedirectResponse:
-    _validate_provider(provider, local_only)
+    _validate_provider(provider, local_only, custom_local=custom_local)
     if provider == "custom" and not custom_base_url.strip():
         raise HTTPException(
             status_code=400, detail="Base URL is required for custom providers."
@@ -457,10 +484,24 @@ def eval_metrics(run_id: str) -> FileResponse:
 # --------------------------------------------------------------------------- #
 
 
-def _validate_provider(provider: str, local_only: bool) -> None:
+def _validate_provider(provider: str, local_only: bool, *, custom_local: bool = False) -> None:
     if provider not in PROVIDERS and provider != "custom":
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
-    if local_only and not is_local_provider(provider) and provider != "custom":
+    if not local_only:
+        return
+    # A custom provider is accepted under local-only only when the caller
+    # marked it self-hosted (the "Self-hosted (local)" checkbox / --local),
+    # mirroring the CLI. Built-in providers are gated by the hardcoded local set.
+    if provider == "custom":
+        if not custom_local:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Local-only mode requires a self-hosted custom provider: "
+                    "tick the \"Self-hosted (local)\" box (or use a local backend)."
+                ),
+            )
+    elif not is_local_provider(provider):
         raise HTTPException(
             status_code=400,
             detail=(

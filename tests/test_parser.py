@@ -56,3 +56,43 @@ def test_parse_openvas_unknown_format_raises():
     """Unsupported file extensions raise ValueError."""
     with pytest.raises(ValueError, match="Unsupported input format"):
         parse("data/unknown_file.docx")
+
+
+def test_parse_nuclei_info_null(tmp_path):
+    """A ``info: null`` nuclei record must not crash the parser."""
+    p = tmp_path / "scan.jsonl"
+    p.write_text(
+        '{"template-id": "x", "info": null, "host": "10.0.0.1", '
+        '"matched-at": "http://10.0.0.1"}\n'
+    )
+    findings = parse(str(p))
+    assert len(findings) == 1
+    assert findings[0].source == "nuclei"
+    assert findings[0].cvss is None
+    assert findings[0].cve is None
+
+
+def test_parse_nuclei_non_numeric_cvss(tmp_path):
+    """A non-numeric ``cvss-score`` (e.g. "N/A") must become None, not raise."""
+    p = tmp_path / "scan.jsonl"
+    p.write_text(
+        '{"template-id": "y", "info": {"name": "Y", "severity": "info", '
+        '"classification": {"cvss-score": "N/A", "cve-id": null}}, '
+        '"host": "10.0.0.2"}\n'
+    )
+    findings = parse(str(p))
+    assert len(findings) == 1
+    assert findings[0].cvss is None
+
+
+def test_parse_openvas_non_numeric_port(tmp_path):
+    """A non-numeric Port (e.g. "general") must become None, not raise."""
+    p = tmp_path / "openvas.csv"
+    p.write_text(
+        "IP,Port,Port Protocol,NVT Name,CVEs,Summary\n"
+        "10.0.0.3,general,tcp,Some Finding,,desc\n"
+    )
+    findings = parse(str(p))
+    assert len(findings) == 1
+    assert findings[0].port is None
+    assert findings[0].host == "10.0.0.3"
